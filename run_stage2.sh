@@ -10,7 +10,7 @@
 set -uo pipefail
 cd "$(dirname "$0")"
 
-export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export PYTHONPATH="$PWD/engine"
 
 STAMP=$(date '+%Y-%m-%d %H:%M %Z')
