@@ -65,6 +65,7 @@ def _max_hold_for(ticker, cfg):
 def _build_exit_and_trail_actions(state, cfg):
     exits = []
     trails = []
+    warnings = []
     exit_seen = set()
 
     trail_mult = _num(cfg.get("exits", {}).get("trail_trigger_mult"), 1.5)
@@ -77,6 +78,12 @@ def _build_exit_and_trail_actions(state, cfg):
 
         current_price = _position_current_price(position)
         avg_cost = _num(position.get("avg_cost") or position.get("average_cost"))
+        _qty = _num(position.get("qty") or position.get("quantity"))
+        _mv  = _num(position.get("current_value") or position.get("market_value"))
+        if _num(position.get("current_price")) <= 0 and not (_qty > 0 and _mv > 0):
+            # Price fell back to avg_cost — stop/target checks below are blind.
+            warnings.append(f"{ticker}: current price unknown (avg_cost fallback) — "
+                            "stop/target checks unreliable, verify with live quotes in Stage 2")
         stop_price = _num(position.get("stop_price"))
         target_price = _num(position.get("target_price"))
         atr = _num(position.get("atr"))
@@ -127,7 +134,7 @@ def _build_exit_and_trail_actions(state, cfg):
                     ),
                 })
 
-    return exits, trails, exit_seen
+    return exits, trails, exit_seen, warnings
 
 
 def _entry_notional(setup, portfolio_value, deployable_cash, cfg):
@@ -201,7 +208,7 @@ def build_plan(signals, state, cfg):
     held_tickers = {_position_ticker(p) for p in open_positions if _position_ticker(p)}
     open_count = int(state.get("open_position_count", len(held_tickers)))
 
-    positions_to_exit, positions_to_trail, exit_seen = _build_exit_and_trail_actions(state, cfg)
+    positions_to_exit, positions_to_trail, exit_seen, warnings = _build_exit_and_trail_actions(state, cfg)
 
     kill_switch = bool(state.get("kill_switch_triggered"))
     kill_reason = state.get("kill_switch_reason")
@@ -212,9 +219,35 @@ def build_plan(signals, state, cfg):
         kill_switch = True
         kill_reason = "weekly loss limit reached"
 
+    # Fail safe on stale inputs. The loss-limit math above is only as real as
+    # state.json — a sample or old snapshot must never authorize new risk.
+    # Stage 2 writes live MCP state each session; ≤5 days covers weekends/holidays.
+    state_source = str(state.get("source", "")).lower()
+    state_age_days = None
+    try:
+        state_age_days = (datetime.now(timezone.utc)
+                          - datetime.fromisoformat(str(state.get("generated_at")))).days
+    except (TypeError, ValueError):
+        pass
+    if state_source not in ("mcp", "live"):
+        kill_switch = True
+        kill_reason = (f"portfolio state source is '{state_source or 'missing'}', not live MCP data "
+                       "— new entries blocked until Stage 2 writes state.json from Robinhood")
+    elif state_age_days is None or state_age_days > 5:
+        kill_switch = True
+        kill_reason = f"portfolio state is stale ({state_age_days if state_age_days is not None else 'unknown'} days old) — new entries blocked"
+
+    today_utc = datetime.now(timezone.utc).date().isoformat()
+    if str(signals.get("session_date")) != today_utc:
+        kill_switch = True
+        kill_reason = (f"signals dated {signals.get('session_date')} but today is {today_utc} "
+                       "— stale plan, no new entries")
+
     qualified_entries = []
     skip_reasons = {}
-    remaining_slots = max(0, max_positions - open_count + len(exit_seen))
+    # Do not credit planned exits back as free slots — an exit can be blocked at
+    # review time, and a filled paired entry would then exceed max_positions.
+    remaining_slots = max(0, max_positions - open_count)
     remaining_cash = deployable_cash
 
     # Track sector counts: start with already-held positions
@@ -233,7 +266,10 @@ def build_plan(signals, state, cfg):
         if kill_switch:
             skip_reasons[ticker] = kill_reason or "kill switch triggered"
             continue
-        if market_risk_off:
+        if market_risk_off and ticker not in set(cfg.get("bear_regime_only", [])):
+            # Inverse ETFs (bear_regime_only) are exempt: they are the designed
+            # bear-side vehicle, and downtrends nearly always coincide with
+            # SPY < 200-SMA — blocking them here made them unreachable.
             skip_reasons[ticker] = "market risk-off (SPY below 200-day SMA) — no new entries"
             continue
         if vix_size_mult == 0.0:
@@ -278,8 +314,12 @@ def build_plan(signals, state, cfg):
             continue
 
         # Apply VIX regime multiplier AND the continuous vol-target multiplier.
+        # Re-cap after scaling: vol_target_mult can be >1 and must never push a
+        # position past the notional cap or the remaining deployable cash.
         size_mult = vix_size_mult * vol_target_mult
-        adjusted_notional = round(sizing["dollar_amount"] * size_mult, 2)
+        adjusted_notional = round(min(sizing["dollar_amount"] * size_mult,
+                                      sizing["max_position_notional"],
+                                      remaining_cash), 2)
         if adjusted_notional < MIN_ORDER_NOTIONAL:
             skip_reasons[ticker] = f"notional after size multiplier ({size_mult:.2f}x) below $1 minimum"
             continue
@@ -309,7 +349,7 @@ def build_plan(signals, state, cfg):
     return {
         "generated_at":  datetime.now(timezone.utc).isoformat(),
         "session_date":  signals.get("session_date"),
-        "mode":          "dry_run",
+        "mode":          "live" if account_cfg.get("autonomous") else "dry_run",
         "spy_regime":    signals.get("spy_regime"),
         "vix_regime":    vix_regime,
         "vix_size_mult": vix_size_mult,
@@ -332,6 +372,7 @@ def build_plan(signals, state, cfg):
         "positions_to_exit": positions_to_exit,
         "positions_to_trail": positions_to_trail,
         "skip_reasons": skip_reasons,
+        "warnings": warnings,
         "source_files": {
             "signals": "signals.json",
             "state": "state.json",
@@ -353,6 +394,16 @@ def main():
     signals = load_json(args.signals)
     state = load_json(args.state)
     cfg = load_json(args.config)
+
+    # A retrained meta-model ships its calibrated threshold in metamodel_meta.json;
+    # prefer it over the config value so retrains apply without a config edit.
+    if cfg.get("meta_filter_threshold") is not None and os.path.exists("metamodel_meta.json"):
+        try:
+            model_thr = load_json("metamodel_meta.json").get("threshold")
+            if model_thr is not None:
+                cfg["meta_filter_threshold"] = float(model_thr)
+        except (ValueError, TypeError, json.JSONDecodeError):
+            pass
     plan = build_plan(signals, state, cfg)
     dump_json(args.output, plan)
 

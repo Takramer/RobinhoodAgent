@@ -10,3 +10,5 @@ shell-init: error retrieving current directory: getcwd: cannot access parent dir
 /bin/bash: /Users/thomaskramer/Downloads/Claude/RobinhoodAgent/run_session.sh: Operation not permitted
 shell-init: error retrieving current directory: getcwd: cannot access parent directories: Operation not permitted
 /bin/bash: /Users/thomaskramer/Downloads/Claude/RobinhoodAgent/run_session.sh: Operation not permitted
+shell-init: error retrieving current directory: getcwd: cannot access parent directories: Operation not permitted
+/bin/bash: /Users/thomaskramer/Downloads/Claude/RobinhoodAgent/run_session.sh: Operation not permitted

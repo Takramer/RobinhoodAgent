@@ -25,7 +25,10 @@ Check the timestamp on plan.json and signals.json in the working directory.
 If either is missing or older than today's date, run:
     bash run_session.sh
 before continuing. This regenerates signals.json and plan.json from fresh
-Alpaca data.
+Alpaca data. If the rerun also fails and signals.json is not dated today,
+HALT: log the failure in decision_log.md and place no orders this run —
+never execute a stale plan. (order_plan.py also enforces this: a plan built
+from stale signals or non-live state has kill_switch_triggered=true.)
 
 ## Step 2 — Live account check
 
@@ -36,11 +39,20 @@ Call, in order:
 - get_portfolio → live portfolio value, cash, buying power
 - get_equity_positions → live open positions
 
-Compare live portfolio_value against plan.json's portfolio_value. If they
-differ by more than 5%, HALT this run — do not place any orders. Log the
-discrepancy prominently in decision_log.md and stop. A >5% drift usually
-means a fill happened outside this system or state has drifted, and trading
-on stale state is the one thing that must never happen unattended.
+Then sync live state and regenerate the plan (mandatory — order_plan.py
+blocks new entries unless state.json is live MCP data written today):
+follow the "Sync live state" step in session_prompt.md exactly — write
+state.json (source "mcp", full schema there) from the live account data,
+then run `python3 order_plan.py --state state.json` and use the regenerated
+plan.json for everything below. If the write or re-run fails, exits (Step 4,
+from live quotes) still execute but place NO new entries this run.
+
+After regeneration, compare live portfolio_value against plan.json's
+portfolio_value. If they differ by more than 5%, HALT this run — do not
+place any orders. Log the discrepancy prominently in decision_log.md and
+stop. A >5% drift usually means a fill happened outside this system or
+state has drifted, and trading on stale state is the one thing that must
+never happen unattended.
 
 ## Step 3 — Risk gates (these stay — they make autonomy survivable)
 

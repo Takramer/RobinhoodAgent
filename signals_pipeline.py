@@ -69,8 +69,18 @@ def build_signals_payload(cfg, verbose=True):
         spy_long = drop_partial_bar(_fetch_one(spy_ticker, interval=interval, lookback_days=380))
         if spy_long and len(spy_long) >= 60:
             spy_bars = spy_long
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"WARNING: Alpaca long SPY fetch failed ({exc}); trying Massive cache")
+        try:
+            from rhengine.market_data import fetch_bars_batch_massive
+            m_out = fetch_bars_batch_massive([spy_ticker], lookback_days=380,
+                                             verbose=False)
+            spy_long = drop_partial_bar(m_out.get("bars", {}).get(spy_ticker, []))
+            if spy_long and len(spy_long) >= 60:
+                spy_bars = spy_long
+        except Exception as exc2:
+            print(f"WARNING: Massive long SPY fetch also failed ({exc2}); "
+                  "trend filter will fail closed on short history")
 
     spy_regime  = classify_spy_regime(spy_bars)
     vix_regime  = estimate_vix_regime(spy_bars)
@@ -78,6 +88,13 @@ def build_signals_payload(cfg, verbose=True):
     # Market overlays (Sharpe levers): crash-avoidance trend filter + vol targeting.
     trend_filter_on = cfg.get("market_trend_filter", True)
     market_risk_off, spy_sma200 = compute_trend_filter(spy_bars)
+    if trend_filter_on and spy_sma200 is None:
+        # Fail closed: if the 380d SPY fetch fell back to short history and the
+        # 200-day SMA can't be computed, treat the market as risk-off rather than
+        # silently disabling the crash-avoidance filter.
+        print("WARNING: SPY 200-day SMA unavailable (short history) — "
+              "trend filter failing CLOSED, new entries blocked this session")
+        market_risk_off = True
     market_risk_off = bool(trend_filter_on and market_risk_off)
     target_vol = cfg.get("account", {}).get("target_annual_vol")
     vol_bounds = tuple(cfg.get("vol_target_bounds", [0.5, 1.5]))
@@ -96,10 +113,9 @@ def build_signals_payload(cfg, verbose=True):
     # Block all new entries in fear_spiking / panic regardless of strategy
     vix_blocked = vix_regime in ("fear_spiking", "panic")
 
-    # Run scoring at min_score=3 to capture candidates for the setup log.
-    # qualified_setups (4/4) are what the agent trades.
-    # candidate_setups (3/4) are logged only — used to measure whether
-    # lowering the threshold would help or hurt over time.
+    # Run scoring at min_score=3. Both 3/4 and 4/4 setups qualify for trading;
+    # the meta-model P(win) filter in order_plan.py is the real quality gate
+    # (purged-OOS backtest: meta-filtered 3/4+4/4 pool beats 4/4-only).
     all_setups = [] if vix_blocked else score_all_tickers(
         bars_map,
         strategy_used,

@@ -28,10 +28,11 @@ accurate if you're running Stage 2 by hand instead of via the scheduled task.
 macOS launchd runs `run_session.sh`. You don't open anything.
 
 What happens in ~90 seconds:
-1. Fetches bars for all 61 tickers + SPY from Alpaca IEX
+1. Fetches bars for the full watchlist (~900 tickers) + SPY
 2. Classifies SPY regime → selects strategy
 3. Estimates VIX regime from SPY ATR
-4. Scores every ticker — 4/4 setups go to `qualified_setups`, 3/4 go to `candidate_setups`
+4. Scores every ticker — 3/4 and 4/4 setups go to `qualified_setups`; the
+   meta-model P(win) filter in order_plan is the quality gate
 5. Checks kill switches (daily/weekly loss limits)
 6. Sizes positions with ATR math, applies VIX multiplier, enforces sector cap
 7. Writes `signals.json` → `plan.json`

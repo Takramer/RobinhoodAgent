@@ -358,7 +358,7 @@ remain fully in force** — do not remove them:
 - `kill_switch_triggered` (daily −3% / weekly −5% realized loss) → blocks new entries
 - `vix_blocked` (Fear Spiking / Panic regime) → blocks new entries
 - Stop-loss / take-profit / time-stop exits always execute
-- Cash floor, max positions, sector caps, 4/4 min score (enforced in Stage 1)
+- Cash floor, max positions, sector caps, 3/4 min score + meta P(win) gate (enforced in Stage 1)
 
 To return to dry-run, set `LIVE_TRADING_ENABLED=false` in `session_prompt.md`.
 
