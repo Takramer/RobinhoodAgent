@@ -1,0 +1,14 @@
+{
+  "generated_at": "2026-06-08T00:00:00+00:00",
+  "source": "sample",
+  "portfolio_value": 50.0,
+  "cash_available": 50.0,
+  "open_positions": [],
+  "open_position_count": 0,
+  "todays_realized_pnl": 0.0,
+  "weekly_realized_pnl": 0.0,
+  "daily_loss_limit_remaining": 1.5,
+  "weekly_loss_limit_remaining": 2.5,
+  "kill_switch_triggered": false,
+  "kill_switch_reason": null
+}

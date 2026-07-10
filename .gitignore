@@ -1,0 +1,23 @@
+
+__pycache__/
+.DS_Store
+.env*
+*.pyc
+# Massive/Polygon data cache + backfill log (regenerable)
+# Meta-labeling artifacts (regenerate with dataset.py + metalabel.py)
+backtest_trades.csv
+decision_log.md
+massive_backfill.log
+massive_cache/
+metamodel_meta.json
+metamodel.joblib
+news_cache.json
+oos_meta_net.csv
+oos_meta.csv
+plan.json
+plan.sample.json
+secrets.json
+setup_log.csv
+signals.json
+state.json
+training_data.csv

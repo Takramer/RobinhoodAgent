@@ -1,0 +1,8 @@
+requests>=2.31.0
+
+# Meta-labeling ML layer (features.py, dataset.py, metalabel.py, metascore.py).
+# The core signal engine (indicators.py) and Stage 1 pipeline still run without
+# these — the meta layer degrades gracefully if they're absent.
+numpy>=2.0
+scikit-learn>=1.5
+joblib>=1.4
