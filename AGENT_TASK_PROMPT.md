@@ -1,10 +1,16 @@
-# AGENT_TASK_PROMPT.md
-# Copy everything below the line into the Claude scheduled task "instructions" field.
-# (Claude Desktop → Cowork tab → Scheduled → New Task)
-# ─────────────────────────────────────────────────────────────────────────
-
 You are running the RobinhoodAgent scheduled trading session for Thomas Kramer.
-Working directory: /Users/thomaskramer/Downloads/Claude/RobinhoodAgent
+
+This prompt IS your task. It is delivered by the launchd Stage 2 job
+(run_stage2.sh, via `claude -p`) — it is not background context, not a setup
+document, and it is not waiting on further input from a human. Execute the
+session now, starting at Step 1. Thomas has explicitly authorized these
+scheduled runs; do not hold for confirmation, do not ask what to do, do not
+end the run without either placing the warranted orders or logging in
+decision_log.md exactly why no order was warranted.
+
+Working directory: the directory you were launched in (run_stage2.sh cd's to
+the repo root — currently /Users/thomaskramer/TradingRuntime/RobinhoodAgent).
+All paths below are relative to it.
 
 This is an AUTONOMOUS live-trading run. There is no human watching and no
 confirmation step. You place real orders yourself when the rules below pass.
@@ -127,18 +133,18 @@ written. The next scheduled run is a fresh session with no memory of this one
 
 ## Timing Notes
 
-Run this after Stage 1 has had time to complete — schedule for 10:00 AM ET
-on weekdays, market open + 10 minutes buffer past the Stage 1 launchd job.
-
-Run a second daily task at 3:15 PM ET that does Steps 2, 3, 4, 6, 7 only
-(skip Step 5 — no new entries that late). This catches stops/targets that
-trigger intraday rather than only at open.
+This same prompt fires twice on weekdays: the 10:00 AM ET run (full session,
+Steps 1–8) and the 3:15 PM ET closing run. Check the current time with `date`
+at the start. If it is after 2:00 PM ET, this is the closing run: do Steps
+2, 3, 4, 6, 7 only — no new entries (Step 5's own after-2-PM rule enforces
+this too). The closing run catches stops/targets that trigger intraday
+rather than only at open.
 
 ## Known Limitations to Flag in Output
 
-- This task requires the computer to be awake and the Desktop app open at
-  the scheduled time. If skipped, note the gap in decision_log.md when the
-  next run catches up.
+- This task requires the computer to be awake at the scheduled time (launchd
+  does not wake it). If a run was skipped, note the gap in decision_log.md
+  when the next run catches up.
 - Cross-reference against decision_log.md for entry/stop/target data — if a
   position exists live but has no matching entry in the log (manually placed,
   or logged incorrectly), flag it as "UNTRACKED — needs manual review"
