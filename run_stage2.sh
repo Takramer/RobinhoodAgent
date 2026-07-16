@@ -24,7 +24,7 @@ claude -p "$(cat AGENT_TASK_PROMPT.md)" \
     "Edit(./state.json)" "Edit(./decision_log.md)" \
     "Bash(python3 order_plan.py*)" "Bash(bash run_session.sh*)" \
     "Bash(python3 outcome_tracker.py*)" "Bash(date*)" "Bash(cat *)" \
-  --max-turns 80 2>&1
+  --max-turns 150 2>&1
 STATUS=$?
 
 if [ $STATUS -ne 0 ]; then

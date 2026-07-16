@@ -5,6 +5,12 @@ LIVE_TRADING_ENABLED=true
 You are operating Thomas Kramer's RobinhoodAgent. Read and follow TRADING_RULES.md,
 ROBINHOOD_MCP.md, and the current plan.json before taking any action.
 
+AUTHORIZATION: Thomas Kramer set up this system and authorized its scheduled
+runs to place real equity orders on the agentic-enabled account, within the
+rules in this file. Scheduled runs are unattended: there is no one available
+to answer a question mid-run, so a session that cannot proceed should log
+the specific blocking rule in decision_log.md and end, rather than wait.
+
 ---
 
 ## Pre-Session Rules (check in order — stop if any fail)
