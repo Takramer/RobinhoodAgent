@@ -133,12 +133,14 @@ written. The next scheduled run is a fresh session with no memory of this one
 
 ## Timing Notes
 
-This same prompt fires twice on weekdays: the 10:00 AM ET run (full session,
-Steps 1–8) and the 3:15 PM ET closing run. Check the current time with `date`
-at the start. If it is after 2:00 PM ET, this is the closing run: do Steps
-2, 3, 4, 6, 7 only — no new entries (Step 5's own after-2-PM rule enforces
-this too). The closing run catches stops/targets that trigger intraday
-rather than only at open.
+This same prompt fires four times on weekdays: 10:00 AM, 12:30 PM, and
+1:45 PM ET are full sessions (Steps 1–8; each midday run follows a Stage 1
+rescan at 12:20/1:35 that rebuilds signals.json and plan.json from intraday
+action), and 3:15 PM ET is the closing run. Check the current time with
+`date` at the start. If it is after 2:00 PM ET, this is the closing run: do
+Steps 2, 3, 4, 6, 7 only — no new entries (Step 5's own after-2-PM rule
+enforces this too). The closing run catches stops/targets that trigger
+intraday rather than only at open.
 
 ## Known Limitations to Flag in Output
 

@@ -137,11 +137,13 @@ def _build_exit_and_trail_actions(state, cfg):
     return exits, trails, exit_seen, warnings
 
 
-def _entry_notional(setup, portfolio_value, deployable_cash, cfg):
+def _entry_notional(setup, portfolio_value, deployable_cash, cfg, dollar_risk_target):
     account_cfg = cfg.get("account", {})
-    risk_pct = _num(account_cfg.get("risk_pct"), 0.02)
-    max_position_notional = _num(
-        account_cfg.get("max_position_notional"),
+    # Position cap scales with the LIVE account: min of the absolute config cap
+    # and max_position_pct of current portfolio value. On a small account the
+    # pct cap binds; on a large one the absolute cap does.
+    max_position_notional = min(
+        _num(account_cfg.get("max_position_notional"), float("inf")),
         portfolio_value * _num(account_cfg.get("max_position_pct"), 0.10),
     )
 
@@ -157,7 +159,6 @@ def _entry_notional(setup, portfolio_value, deployable_cash, cfg):
     if stop_pct <= 0:
         return None, "invalid stop distance"
 
-    dollar_risk_target = portfolio_value * risk_pct
     raw_notional = dollar_risk_target / stop_pct
     dollar_amount = min(raw_notional, max_position_notional, deployable_cash)
 
@@ -182,9 +183,25 @@ def _get_sector(ticker, cfg):
     return cfg.get("sector_map", {}).get(ticker.upper(), "unknown")
 
 
-def build_plan(signals, state, cfg):
+def _drawdown_risk_mult(drawdown):
+    # ponytail: tiered cutback, continuous curve if tuning ever demands it
+    if drawdown < 0.05:
+        return 1.0
+    if drawdown < 0.10:
+        return 0.5
+    return 0.25
+
+
+def build_plan(signals, state, cfg, high_water_mark=None):
     account_cfg = cfg.get("account", {})
     portfolio_value = _num(state.get("portfolio_value"), _num(account_cfg.get("portfolio_value"), 50.0))
+    # High-water-mark risk base: risk_pct applies to the portfolio's peak, and
+    # gets cut back in tiers as drawdown from that peak deepens. Keeps risk
+    # steady through small dips, throttles it when the account is bleeding.
+    hwm = max(_num(high_water_mark), portfolio_value)
+    drawdown = 1.0 - (portfolio_value / hwm) if hwm > 0 else 0.0
+    dd_risk_mult = _drawdown_risk_mult(drawdown)
+    dollar_risk_target = hwm * _num(account_cfg.get("risk_pct"), 0.02) * dd_risk_mult
     cash_available = _num(state.get("cash_available"))
     cash_floor = portfolio_value * _num(account_cfg.get("cash_floor_pct"), 0.20)
     deployable_cash = max(0.0, cash_available - cash_floor)
@@ -308,7 +325,8 @@ def build_plan(signals, state, cfg):
             skip_reasons[ticker] = f"sector cap reached ({sector}: {sector_counts[sector]}/{max_per_sector})"
             continue
 
-        sizing, skip_reason = _entry_notional(setup, portfolio_value, remaining_cash, cfg)
+        sizing, skip_reason = _entry_notional(setup, portfolio_value, remaining_cash, cfg,
+                                              dollar_risk_target)
         if skip_reason:
             skip_reasons[ticker] = skip_reason
             continue
@@ -360,6 +378,10 @@ def build_plan(signals, state, cfg):
         "strategy_used": signals.get("strategy_used"),
         "size_multiplier": round(vix_size_mult * vol_target_mult, 3),
         "portfolio_value": round(portfolio_value, 2),
+        "high_water_mark": round(hwm, 2),
+        "drawdown_pct": round(drawdown, 4),
+        "dd_risk_mult": dd_risk_mult,
+        "dollar_risk_target": round(dollar_risk_target, 4),
         "cash_available": round(cash_available, 2),
         "cash_floor": round(cash_floor, 2),
         "deployable_cash_start": round(deployable_cash, 2),
@@ -404,7 +426,22 @@ def main():
                 cfg["meta_filter_threshold"] = float(model_thr)
         except (ValueError, TypeError, json.JSONDecodeError):
             pass
-    plan = build_plan(signals, state, cfg)
+    # High-water mark persists in hwm.json (runtime artifact, gitignored).
+    # Only live MCP state may raise it — a sample/stale snapshot with a wrong
+    # portfolio_value must never poison the risk base.
+    hwm_path = "hwm.json"
+    prior_hwm = 0.0
+    if os.path.exists(hwm_path):
+        try:
+            prior_hwm = float(load_json(hwm_path).get("high_water_mark", 0.0))
+        except (ValueError, TypeError, json.JSONDecodeError):
+            pass
+    plan = build_plan(signals, state, cfg, high_water_mark=prior_hwm)
+
+    if str(state.get("source", "")).lower() in ("mcp", "live") and plan["high_water_mark"] > prior_hwm:
+        dump_json(hwm_path, {"high_water_mark": plan["high_water_mark"],
+                             "updated_at": datetime.now(timezone.utc).isoformat()})
+
     dump_json(args.output, plan)
 
     print(

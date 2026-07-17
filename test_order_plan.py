@@ -76,9 +76,32 @@ class OrderPlanTests(unittest.TestCase):
         self.assertEqual(len(plan["qualified_setups"]), 1)
         entry = plan["qualified_setups"][0]
         self.assertEqual(entry["ticker"], "MSFT")
-        self.assertEqual(entry["dollar_amount"], 10.0)
-        self.assertEqual(entry["dollar_risk"], 0.5)
-        self.assertEqual(plan["deployable_cash_remaining"], 30.0)
+        # pct cap binds: 10% of the live $50 portfolio = $5, tighter than the
+        # $10 absolute cap. Risk target = 2% of HWM ($50) = $1 → raw $20 → capped.
+        self.assertEqual(entry["dollar_amount"], 5.0)
+        self.assertEqual(entry["dollar_risk"], 0.25)
+        self.assertEqual(plan["deployable_cash_remaining"], 35.0)
+
+    def test_position_cap_scales_with_live_balance_not_config(self):
+        # Config absolute cap is $400-style-huge; live balance is $50 → cap $5.
+        cfg = base_config()
+        cfg["account"]["max_position_notional"] = 400.0
+        plan = build_plan(base_signals(setup()), base_state(), cfg)
+        self.assertEqual(plan["qualified_setups"][0]["max_position_notional"], 5.0)
+
+    def test_hwm_drawdown_cuts_risk(self):
+        # Portfolio at $50 off a $60 peak = 16.7% drawdown → quarter risk.
+        plan = build_plan(base_signals(setup()), base_state(), base_config(),
+                          high_water_mark=60.0)
+        self.assertEqual(plan["high_water_mark"], 60.0)
+        self.assertEqual(plan["dd_risk_mult"], 0.25)
+        self.assertEqual(plan["dollar_risk_target"], 0.3)  # 60 * 0.02 * 0.25
+
+    def test_hwm_never_below_current_portfolio(self):
+        plan = build_plan(base_signals(setup()), base_state(), base_config(),
+                          high_water_mark=10.0)
+        self.assertEqual(plan["high_water_mark"], 50.0)
+        self.assertEqual(plan["dd_risk_mult"], 1.0)
 
     def test_skips_bear_setup_because_robinhood_mcp_cannot_short(self):
         plan = build_plan(base_signals(setup(direction="bear")), base_state(), base_config())
@@ -209,7 +232,7 @@ class OrderPlanTests(unittest.TestCase):
         signals["vol_target_mult"] = 1.5
         plan = build_plan(signals, base_state(), base_config())
         entry = plan["qualified_setups"][0]
-        self.assertLessEqual(entry["dollar_amount"], 10.0)  # max_position_notional
+        self.assertLessEqual(entry["dollar_amount"], 5.0)  # 10% of live portfolio
 
     def test_exits_still_execute_under_kill_switch(self):
         state = base_state(
