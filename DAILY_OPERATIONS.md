@@ -59,7 +59,6 @@ autonomous execution workflow from `session_prompt.md`.
 **What happens during execution (either option):**
 - Exits first: any position that hit its stop, target, or 10-session time limit
 - Then entries: each 4/4 setup in plan.json → `review_equity_order` → `place_equity_order`
-- FINRA gate triggers on first order attempt ever (one-time, 5-minute questionnaire)
 - Fractional rate limit: no more than ~10 orders per session before a 429
 
 **No new entries after 2:00 PM ET.** GFD market orders placed after 2 PM may not fill
@@ -96,7 +95,7 @@ Automated stop management comes in a later phase once MCP stop orders are tested
 tail -50 ~/Downloads/Claude/RobinhoodAgent/decision_log.md
 ```
 
-Skim for: any errors, unexpected skips, FINRA or rate-limit flags, order fills confirmed.
+Skim for: any errors, unexpected skips, rate-limit flags, order fills confirmed.
 Takes 2 minutes. If everything looks normal, you're done for the day.
 
 ---
@@ -130,7 +129,6 @@ This prints the full breakdown:
 | `plan.json` has 0 qualified setups | Normal — market conditions didn't qualify anything today |
 | `plan.json` has `kill_switch_triggered: true` | Check the reason — daily or weekly loss limit hit |
 | `plan.json` has `vix_blocked: true` | VIX regime too high — no entries today, correct behavior |
-| Stage 2 returns FINRA 400 error | Complete the questionnaire at the deep-link in the error |
 | Stage 2 returns HTTP 429 | Rate limit hit — stop entries for today, try again tomorrow |
 | Order filled at unexpected price | Market order slippage — acceptable on liquid large-caps |
 | Position not in Robinhood app | Check `decision_log.md` for the exact fill confirmation |

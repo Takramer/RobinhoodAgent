@@ -19,7 +19,7 @@ These rules govern Claude/Codex execution after Python has produced `plan.json`.
   - skip if the ticker is not tradeable
   - skip fractional orders if the ticker is not fractionally tradeable
   - call `review_equity_order`
-  - stop if Robinhood returns blocking alerts, suitability errors, halted warnings, or insufficient buying power
+  - stop if Robinhood returns blocking alerts, halted warnings, or insufficient buying power
 
 ## Exit rules
 

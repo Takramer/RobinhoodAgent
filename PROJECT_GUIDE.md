@@ -405,14 +405,7 @@ Do not call them until a dedicated options sleeve is built.
 
 ## 11. Critical Production Gotchas
 
-### 1. FINRA Rule 2111 Suitability Gate
-After the first few trades on a fresh agentic account, Robinhood blocks all order placement
-until FINRA investor profile suitability questions are completed. The API returns HTTP 400
-with a deep-link to the questionnaire. This cannot be pre-completed — it only appears after
-the first order attempt. When it triggers: follow the link, complete the 5-minute form, resume.
-Happens once per account.
-
-### 2. Fractional Order Rate Limit
+### 1. Fractional Order Rate Limit
 Separate from the general API rate limit. After ~10–15 fractional orders, Robinhood returns
 HTTP 429 and blocks the bucket. Mitigation: delay between orders, spread rebalances across
 days, or use whole-share limit orders where position size allows.
@@ -551,9 +544,6 @@ Robinhood MCP, call `get_accounts`, verify positions, and — because
 `LIVE_TRADING_ENABLED=true` — place real orders after each `review_equity_order`
 passes. No confirmation prompt.
 
-**When the FINRA 400 error appears:** Follow the deep-link in the error response,
-complete the suitability questionnaire, then re-run. This only happens once.
-
 **To pause live trading:** Set `LIVE_TRADING_ENABLED=false` in `session_prompt.md`.
 The session then runs review-only (simulation) without placing orders. The risk
 gates (kill switch, VIX block, loss limits) apply in either mode and are separate
@@ -659,7 +649,6 @@ Strategy keys used in both codebases: `vwap`, `bollinger`, `macd`, `consolidatio
 - [x] Unit tests: `python3 -m unittest test_order_plan.py -v` all pass
 - [x] Pipeline script: `bash run_session.sh` runs without errors
 - [ ] First Claude Code session: dry-run with Robinhood MCP (read-only tools only)
-- [ ] FINRA suitability gate: triggered on first order attempt, completed once
 - [ ] Second+ Claude Code sessions: confirm state.json reflects real MCP data
 - [ ] `LIVE_TRADING_ENABLED=true`: only after dry-run sessions validate cleanly
 - [ ] Fractional rate limit: do not exceed ~10 fractional orders per session

@@ -107,11 +107,8 @@ by Stage 1):
   real order.
 - Log the outcome of every candidate (filled / skipped + reason).
 
-## Step 6 — Gate and rate-limit handling
+## Step 6 — Rate-limit handling
 
-- FINRA suitability gate: if place_equity_order returns HTTP 400 with a
-  suitability deep-link, log the link and HALT order placement for this run.
-  Do not retry automatically. This appears once per account.
 - Fractional rate limit: if any order returns HTTP 429, log it and STOP
   placing further orders this run. Do not retry. More than 2 HTTP 429s in one
   run is a hard stop for the whole run.

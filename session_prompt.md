@@ -78,11 +78,6 @@ For each setup in `qualified_setups`:
 - If review returns no blocking alerts: call `place_equity_order`
 - Log outcome
 
-### FINRA suitability gate
-If `place_equity_order` returns HTTP 400 with a suitability deep-link:
-- Log: "FINRA Rule 2111 suitability gate triggered. Complete questionnaire at [link] then retry."
-- Do not retry automatically — halt and notify Thomas.
-
 ### Fractional rate limit
 If any order returns HTTP 429:
 - Log: "Fractional rate limit hit. Stopping order placement for this session."
