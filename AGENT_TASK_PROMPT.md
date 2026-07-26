@@ -14,137 +14,110 @@ All paths below are relative to it.
 
 This is an AUTONOMOUS live-trading run. There is no human watching and no
 confirmation step. You place real orders yourself when the rules below pass.
-`session_prompt.md` is the single source of truth for the execution workflow —
-this file just wires it into the scheduled context. Where the two overlap,
-`session_prompt.md` wins.
 
-Read these files first, in order, before doing anything else:
-1. session_prompt.md — the canonical execution workflow (LIVE_TRADING_ENABLED=true)
-2. TRADING_RULES.md — hard stops and entry/exit rules
-3. CLOSING_SCAN.md — exact exit detection logic
-4. ROBINHOOD_MCP.md — tool reference
-5. config.json — current risk parameters and watchlist
+## Efficiency rules (this is a scheduled, unattended, token-metered run)
 
-## Step 1 — Verify Stage 1 ran today
+- The exit/trail logic lives in `order_plan.py`, not in your head. You execute
+  `plan.json`; you do not re-derive stops, targets, or time stops yourself.
+- Do NOT read `decision_log.md`, `config.json`, `signals.json`, or
+  `CLOSING_SCAN.md`. Per-position stop/target/ATR/sessions_held carry forward
+  in `state.json`, which is small. Append to decision_log.md at the end; never
+  read it back.
+- Batch MCP calls (quotes take up to 20 symbols per call). No exploratory
+  calls, no re-reading files you already read, no summarising work in progress.
+- Read only: `plan.json`, `state.json`, and — only if you hit a rule you do not
+  recognise — `TRADING_RULES.md` or `ROBINHOOD_MCP.md`.
 
-Check the timestamp on plan.json and signals.json in the working directory.
-If either is missing or older than today's date, run:
-    bash run_session.sh
-before continuing. This regenerates signals.json and plan.json from fresh
-Alpaca data. If the rerun also fails and signals.json is not dated today,
-HALT: log the failure in decision_log.md and place no orders this run —
-never execute a stale plan. (order_plan.py also enforces this: a plan built
-from stale signals or non-live state has kill_switch_triggered=true.)
+## Step 1 — Freshness
 
-## Step 2 — Live account check
+Check `plan.json` and `signals.json` timestamps. If either is missing or not
+from today, run `bash run_session.sh` once. If signals.json is still not from
+today, HALT: log the failure in decision_log.md and place no orders.
+(order_plan.py enforces this too: a stale plan sets kill_switch_triggered.)
+
+## Step 2 — Live account sync
 
 Call, in order:
-- get_accounts → identify the account with agentic_allowed=true. Use only
-  this account for everything below. Never hardcode or guess the account
-  number.
-- get_portfolio → live portfolio value, cash, buying power
-- get_equity_positions → live open positions
+- `get_accounts` → use only the account with agentic_allowed=true. Never
+  hardcode or guess the account number.
+- `get_portfolio` → live value, cash, buying power
+- `get_equity_positions` → live open positions
+- `get_equity_quotes` → live prices for the held tickers (one batched call)
 
-Then sync live state and regenerate the plan (mandatory — order_plan.py
-blocks new entries unless state.json is live MCP data written today):
-follow the "Sync live state" step in session_prompt.md exactly — write
-state.json (source "mcp", full schema there) from the live account data,
-then run `python3 order_plan.py --state state.json` and use the regenerated
-plan.json for everything below. If the write or re-run fails, exits (Step 4,
-from live quotes) still execute but place NO new entries this run.
+Then write `state.json` using the schema in session_prompt.md. Carry
+`stop_price`, `target_price`, `atr` and `sessions_held` forward from the
+existing `state.json` for each ticker still held — increment `sessions_held`
+by 1 per trading day elapsed since that file was written. A live position with
+no entry in the existing state.json is UNTRACKED: include it with the fields
+you have, flag it in the log, and never trade it automatically.
 
-After regeneration, compare live portfolio_value against plan.json's
-portfolio_value. If they differ by more than 5%, HALT this run — do not
-place any orders. Log the discrepancy prominently in decision_log.md and
-stop. A >5% drift usually means a fill happened outside this system or
-state has drifted, and trading on stale state is the one thing that must
-never happen unattended.
+Then run `python3 order_plan.py --state state.json` and use the regenerated
+plan.json for everything below. If the write or re-run fails, exits still
+execute from the previous plan; place NO new entries.
 
-## Step 3 — Risk gates (these stay — they make autonomy survivable)
+Compare live portfolio_value against plan.json's portfolio_value. If they
+differ by more than 5%, HALT — place no orders, log the discrepancy
+prominently in decision_log.md, stop. Trading on drifted state unattended is
+the one thing that must never happen.
 
-Read from plan.json:
-- If `kill_switch_triggered` is true → place NO new entries this run. Exits
-  still execute normally (a hit stop/target/time-stop is never blocked).
-- If `vix_blocked` is true → place NO new entries this run. Exits still
-  execute normally.
+## Step 3 — Risk gates
 
-These gates never stop an exit and never stop a stop-loss. They only stop new
-risk. Do not remove or override them.
+From plan.json: if `kill_switch_triggered` or `vix_blocked` is true, place NO
+new entries this run. Exits always still execute — these gates stop new risk,
+never a stop-loss. Do not remove or override them.
 
-## Step 4 — Closing scan and EXITS (execute, do not queue)
+## Step 4 — EXITS (execute, do not queue)
 
-Follow CLOSING_SCAN.md exactly. For every open position from
-get_equity_positions:
-- Cross-reference against decision_log.md to find entry price, stop,
-  target, ATR, and entry date
-- Call get_equity_quotes for current prices (batch, max 20 symbols per call)
-- Apply the 5 exit checks from CLOSING_SCAN.md in order
-- For every position that qualifies for exit:
-    · Call review_equity_order (side=sell, type=market) to pre-validate
-    · If review returns NO blocking alerts → call place_equity_order to
-      close the position. This is a real order.
-    · If review returns a blocking alert → skip, log the specific alert.
-- For every position flagged for a trail-to-breakeven stop update: log it as
-  a stop adjustment in decision_log.md. Persistent stop orders via MCP are
-  still log-only (see TRADING_RULES.md) — do not place a stop order for it.
-- If a live position has no matching entry in decision_log.md, flag it as
-  "UNTRACKED — needs manual review" and do NOT trade it automatically.
+For every entry in plan.json `positions_to_exit`:
+- `review_equity_order` (side=sell, type=market, full qty)
+- No blocking alerts → `place_equity_order`. This is a real order.
+- Blocking alert → skip, log the specific alert.
+
+For every entry in `positions_to_trail`: log the new stop in decision_log.md
+and write it into state.json's `stop_price` for that ticker. Do not place a
+stop order (persistent stops via MCP are still log-only — TRADING_RULES.md).
+
+Any live position flagged UNTRACKED in Step 2: log it, do not trade it.
 
 ## Step 5 — ENTRIES (execute, do not queue)
 
-Skip this entire step if Step 3 blocked entries (kill switch or VIX), or if
-it is later than 2:00 PM ET (GFD market orders placed after 2 PM may not fill
-before close). Log the skip reason.
+Skip this step entirely — no tradability calls, no reviews — if any of:
+- plan.json `entries_enabled` is false (manage-only mode; currently the case)
+- Step 3 blocked entries
+- `qualified_setups` is empty
+- it is later than 2:00 PM ET
+Log one line naming the reason and move on.
 
-Otherwise, from plan.json's qualified_setups (already sized and regime-gated
-by Stage 1):
-- Call get_equity_tradability for each ticker (max 10 per call)
-- Skip and log any that fail tradability (or fractional eligibility)
-- Call review_equity_order (side=buy, type=market, dollar_amount from plan)
-- If review returns a blocking alert (insufficient buying power, halted,
-  PDT flag) → skip and log the specific alert.
-- If review returns NO blocking alerts → call place_equity_order. This is a
-  real order.
-- Log the outcome of every candidate (filled / skipped + reason).
+Otherwise, for each setup in `qualified_setups`:
+- `get_equity_tradability` (batch, max 10 per call); skip and log failures
+- `review_equity_order` (side=buy, type=market, dollar_amount from plan)
+- Blocking alert (buying power, halted, PDT) → skip and log it
+- Otherwise `place_equity_order`. This is a real order.
 
-## Step 6 — Rate-limit handling
+## Step 6 — Rate limits
 
-- Fractional rate limit: if any order returns HTTP 429, log it and STOP
-  placing further orders this run. Do not retry. More than 2 HTTP 429s in one
-  run is a hard stop for the whole run.
+Any HTTP 429: log it and STOP placing further orders this run. Do not retry.
+More than 2 in one run is a hard stop for the whole run.
 
 ## Step 7 — Append to decision_log.md
 
-Append a permanent record using the Session Log format in session_prompt.md,
-even if nothing traded. Every run gets a log entry — "nothing to do today" is
-still logged, not skipped. Record: regime, strategy, account value/cash/open
-positions, every exit placed/skipped with reason, every entry placed/skipped
-with reason, realized/unrealized P&L, and any gate or error.
+Append one record in the Session Log format from session_prompt.md, even when
+nothing traded. Keep it to that format — no essay, no restating the workflow.
+Record: regime, strategy, account value/cash/positions, every exit and entry
+placed or skipped with reason, realized/unrealized P&L, gates, errors.
 
 ## Step 8 — End the run
 
-Do not wait for a reply. Do not poll for confirmation. Do not write a queue
-file. The run is complete once the orders are placed and decision_log.md is
-written. The next scheduled run is a fresh session with no memory of this one
-— that is expected and by design.
+Do not wait for a reply, poll for confirmation, or write a queue file. The run
+is done once orders are placed and decision_log.md is written. Your final
+message: at most 5 lines. The next run is a fresh session with no memory of
+this one — that is by design.
 
-## Timing Notes
+## Timing
 
-This same prompt fires four times on weekdays: 10:00 AM, 12:30 PM, and
-1:45 PM ET are full sessions (Steps 1–8; each midday run follows a Stage 1
-rescan at 12:20/1:35 that rebuilds signals.json and plan.json from intraday
-action), and 3:15 PM ET is the closing run. Check the current time with
-`date` at the start. If it is after 2:00 PM ET, this is the closing run: do
-Steps 2, 3, 4, 6, 7 only — no new entries (Step 5's own after-2-PM rule
-enforces this too). The closing run catches stops/targets that trigger
-intraday rather than only at open.
+Weekdays, twice: 10:00 AM ET (full session, Steps 1–8) and 3:15 PM ET (closing
+run — Steps 2, 3, 4, 6, 7 only, no entries). Check the time with `date` at the
+start; after 2:00 PM ET this is the closing run.
 
-## Known Limitations to Flag in Output
-
-- This task requires the computer to be awake at the scheduled time (launchd
-  does not wake it). If a run was skipped, note the gap in decision_log.md
-  when the next run catches up.
-- Cross-reference against decision_log.md for entry/stop/target data — if a
-  position exists live but has no matching entry in the log (manually placed,
-  or logged incorrectly), flag it as "UNTRACKED — needs manual review"
-  rather than guessing at its stop/target, and do not trade it.
+launchd does not wake the machine. If a run was skipped because the computer
+was asleep, note the gap in decision_log.md on the next run.

@@ -110,6 +110,24 @@ class OrderPlanTests(unittest.TestCase):
         self.assertIn("MSFT", plan["skip_reasons"])
         self.assertIn("no short selling", plan["skip_reasons"]["MSFT"])
 
+    def test_manage_only_mode_blocks_entries_but_not_exits(self):
+        cfg = base_config()
+        cfg["entries_enabled"] = False
+        state = base_state()
+        state["open_positions"] = [{
+            "ticker": "AAPL", "qty": 1.0, "avg_cost": 100.0,
+            "current_price": 89.0, "stop_price": 90.0,
+            "target_price": 120.0, "atr": 5.0, "sessions_held": 2,
+        }]
+        state["open_position_count"] = 1
+
+        plan = build_plan(base_signals(setup()), state, cfg)
+
+        self.assertFalse(plan["entries_enabled"])
+        self.assertEqual(plan["qualified_setups"], [])
+        self.assertIn("manage-only", plan["skip_reasons"]["*"])
+        self.assertEqual([e["ticker"] for e in plan["positions_to_exit"]], ["AAPL"])
+
     def test_respects_cash_floor(self):
         plan = build_plan(
             base_signals(setup()),

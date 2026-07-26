@@ -1,10 +1,14 @@
 # CLOSING_SCAN.md — Exit Detection & Execution Logic
 
-This file defines exactly how the agent (scheduled task or manual chat session)
-evaluates whether an open position should be exited, and then executes that exit
-autonomously. Runs against LIVE Robinhood data (`get_equity_positions` +
-`get_equity_quotes`), not the dry-run `state.json` used by the Stage 1 Python
-pipeline.
+**This is the spec. `order_plan.py` (`_build_exit_and_trail_actions`) is the
+implementation.** The scheduled agent does NOT re-derive these checks by hand:
+it writes live prices into `state.json`, runs `order_plan.py`, and executes
+`plan.json.positions_to_exit` / `positions_to_trail`. Two engines evaluating
+the same rules is how they drift apart — and it cost a few thousand tokens a
+run. Read this file when changing the rules; do not read it during a run.
+
+Checks run against live Robinhood prices (`get_equity_positions` +
+`get_equity_quotes`) written into `state.json` at the start of each session.
 
 Every exit detected here is executed immediately: `review_equity_order`
 (side=sell, type=market) → if no blocking alerts → `place_equity_order`. There
@@ -47,11 +51,14 @@ it is sold at this scan (review → place) regardless of any other condition bel
 ### 2. Take Profit Target
 ```
 if direction == "bull" and current_price >= target_price:
-    → EXIT NOW, reason: "TP", 75% of position, market order
-    → Remaining 25% gets a trailing stop note (see Trail section below)
+    → EXIT NOW, reason: "TP", full position, market order
 if direction == "bear" and current_price <= target_price:
     → same logic, inverse direction
 ```
+Full position, not a 75% partial: at current sizing a 25% runner is roughly
+$1 of stock, at or below Robinhood's fractional order minimum, so the stub
+could not be sold later. The Chandelier trail (check 3) is what lets winners
+run instead.
 
 ### 3. Breakeven Trail Trigger
 ```

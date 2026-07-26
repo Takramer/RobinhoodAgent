@@ -35,7 +35,7 @@ the specific blocking rule in decision_log.md and end, rather than wait.
        {
          "ticker": "...", "qty": <float>, "avg_cost": <float>,
          "current_price": <live quote>,
-         "stop_price": <carried from decision_log.md / prior state>,
+         "stop_price": <carried from the existing state.json>,
          "target_price": <carried>, "atr": <carried>,
          "sessions_held": <prior value + 1 per trading day held>
        }
@@ -49,9 +49,11 @@ the specific blocking rule in decision_log.md and end, rather than wait.
    }
    ```
 
-   For a live position with no stop/target in decision_log.md or prior state:
-   include it with the fields you have, mark it in the log as
-   "UNTRACKED — needs manual review", and never trade it automatically.
+   state.json is the carry file for per-position stop/target/ATR/sessions —
+   read it, never decision_log.md (which is append-only and grows without
+   bound). A live position absent from the existing state.json: include it
+   with the fields you have, mark it in the log as "UNTRACKED — needs manual
+   review", and never trade it automatically.
 
    Then run: `python3 order_plan.py --state state.json`
    If the state write or the re-run fails, treat the session as kill-switched:
@@ -70,7 +72,9 @@ For each position in `positions_to_exit`:
 - Log outcome
 
 ### Then entries (qualified_setups)
-For each setup in `qualified_setups`:
+Skip this section entirely if `plan.json.entries_enabled` is false —
+manage-only mode, exits and trails still run. For each setup in
+`qualified_setups`:
 - Call `get_equity_tradability` for the ticker
 - If not tradeable: log reason, skip
 - Call `review_equity_order` (side=buy, type=market, dollar_amount from plan)

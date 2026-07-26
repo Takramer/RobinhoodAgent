@@ -275,7 +275,17 @@ def build_plan(signals, state, cfg, high_water_mark=None):
             s = _get_sector(t, cfg)
             sector_counts[s] = sector_counts.get(s, 0) + 1
 
-    for setup in signals.get("qualified_setups", []):
+    # Manage-only mode: exits and trails still run, new entries are off. One
+    # skip line instead of 48 identical ones — Stage 2 reads this file.
+    entries_enabled = bool(cfg.get("entries_enabled", True))
+    candidate_setups = signals.get("qualified_setups", []) if entries_enabled else []
+    if not entries_enabled:
+        skip_reasons["*"] = (
+            f"entries disabled (manage-only mode) — "
+            f"{len(signals.get('qualified_setups', []))} setups not evaluated"
+        )
+
+    for setup in candidate_setups:
         ticker = str(setup.get("ticker", "")).upper()
         if not ticker:
             continue
@@ -390,6 +400,7 @@ def build_plan(signals, state, cfg, high_water_mark=None):
         "max_open_positions": max_positions,
         "kill_switch_triggered": kill_switch,
         "kill_switch_reason": kill_reason,
+        "entries_enabled": entries_enabled,
         "qualified_setups": qualified_entries,
         "positions_to_exit": positions_to_exit,
         "positions_to_trail": positions_to_trail,

@@ -17,6 +17,18 @@ Two automated layers now run without you touching anything:
    limits, VIX blocks, SL/TP/time-stop exits). See AGENT_TASK_PROMPT.md for
    the exact instructions this task runs.
 
+Stage 2 also runs a closing session at 3:15 PM ET (exits only — no entries
+after 2 PM ET).
+
+**Manage-only mode is ON.** `config.json` → `"entries_enabled": false`. The
+planner emits zero `qualified_setups`, so the scheduled runs only manage open
+positions: exits, trails, logging. To resume buying, set it back to `true` —
+and consider restoring the midday runs (12:20/13:35 Stage 1, 12:30/13:45
+Stage 2) that were removed from the two plists alongside it.
+
+Stage 2 runs on Sonnet at medium effort with a 60-turn budget (see
+run_stage2.sh) — the session is clerical, the judgement is in order_plan.py.
+
 Everything below reflects the fully manual version of this workflow — still
 accurate if you're running Stage 2 by hand instead of via the scheduled task.
 

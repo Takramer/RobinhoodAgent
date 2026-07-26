@@ -16,7 +16,13 @@ export PYTHONPATH="$PWD/engine"
 STAMP=$(date '+%Y-%m-%d %H:%M %Z')
 echo "── Stage 2 session $STAMP ──"
 
+# Sonnet at medium effort: the session is mechanical — read plan.json, copy
+# live numbers into state.json, run the planner, place the sells it lists. The
+# judgement lives in order_plan.py, not here. Opus was ~5x the cost for the
+# same clerical work. Turn budget 60: a manage-only run needs ~15.
 claude -p "$(cat AGENT_TASK_PROMPT.md)" \
+  --model sonnet \
+  --effort medium \
   --allowedTools \
     "mcp__robinhood" \
     "mcp__claude_ai_Robinhood" \
@@ -24,7 +30,7 @@ claude -p "$(cat AGENT_TASK_PROMPT.md)" \
     "Edit(./state.json)" "Edit(./decision_log.md)" \
     "Bash(python3 order_plan.py*)" "Bash(bash run_session.sh*)" \
     "Bash(python3 outcome_tracker.py*)" "Bash(date*)" "Bash(cat *)" \
-  --max-turns 150 2>&1
+  --max-turns 60 2>&1
 STATUS=$?
 
 if [ $STATUS -ne 0 ]; then
