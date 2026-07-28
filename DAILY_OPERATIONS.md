@@ -29,6 +29,13 @@ Stage 2) that were removed from the two plists alongside it.
 Stage 2 runs on Sonnet at medium effort with a 60-turn budget (see
 run_stage2.sh) — the session is clerical, the judgement is in order_plan.py.
 
+`validate_plan.py` gates both stages: Stage 1 checks the plan it writes, Stage
+2 re-checks the plan it regenerates from live account state. A rejected plan
+halts the run with no orders placed and the FAIL lines in `decision_log.md`;
+run `python3 validate_plan.py` yourself to see why. Stage 2 also exits before
+spending anything if it fires outside 9:30–16:00 ET — a slot missed while the
+Mac slept used to run a full session against a closed market.
+
 Everything below reflects the fully manual version of this workflow — still
 accurate if you're running Stage 2 by hand instead of via the scheduled task.
 
