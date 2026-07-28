@@ -128,6 +128,28 @@ class OrderPlanTests(unittest.TestCase):
         self.assertIn("manage-only", plan["skip_reasons"]["*"])
         self.assertEqual([e["ticker"] for e in plan["positions_to_exit"]], ["AAPL"])
 
+    def test_nothing_to_manage_only_when_flat_and_entries_off(self):
+        cfg = base_config()
+        flat = base_state()
+        flat["open_positions"] = []
+        flat["open_position_count"] = 0
+
+        # Entries on: there is still work to do (a setup could be bought).
+        self.assertFalse(build_plan(base_signals(setup()), flat, cfg)["nothing_to_manage"])
+
+        cfg["entries_enabled"] = False
+        self.assertTrue(build_plan(base_signals(setup()), flat, cfg)["nothing_to_manage"])
+
+        # Holding anything means there is a book to manage.
+        held = base_state()
+        held["open_positions"] = [{
+            "ticker": "AAPL", "qty": 1.0, "avg_cost": 100.0,
+            "current_price": 105.0, "stop_price": 95.0,
+            "target_price": 120.0, "atr": 5.0, "sessions_held": 1,
+        }]
+        held["open_position_count"] = 1
+        self.assertFalse(build_plan(base_signals(setup()), held, cfg)["nothing_to_manage"])
+
     def test_respects_cash_floor(self):
         plan = build_plan(
             base_signals(setup()),

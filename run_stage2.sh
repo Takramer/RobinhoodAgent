@@ -31,6 +31,22 @@ if [ "$DOW" -gt 5 ] || [ "$MINS" -lt 930 ] || [ "$MINS" -gt 1600 ]; then
   exit 0
 fi
 
+# Flat-book skip. With entries off and no positions, the morning session exists
+# only to confirm zero. order_plan.py decides this (plan.nothing_to_manage);
+# anything unreadable or stale falls through and runs the session. The closing
+# run always goes live, so a fill placed outside this system is still caught
+# the same day.
+if [ "$MINS" -lt 1400 ] && python3 -c "
+import json, sys, datetime
+p = json.load(open('plan.json'))
+sys.exit(0 if p.get('nothing_to_manage') and
+              p.get('session_date') == datetime.date.today().isoformat() else 1)
+" 2>/dev/null; then
+  echo "SKIPPED: nothing to manage at $(TZ=America/New_York date '+%a %H:%M ET') \
+— flat book, entries disabled. Closing run still checks live." | tee -a decision_log.md
+  exit 0
+fi
+
 # Sonnet at medium effort: the session is mechanical — read plan.json, copy
 # live numbers into state.json, run the planner, place the sells it lists. The
 # judgement lives in order_plan.py, not here. Opus was ~5x the cost for the

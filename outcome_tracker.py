@@ -207,12 +207,17 @@ def print_summary():
             print(f"    {strat:20s} {len(subset):3d} trades  "
                   f"WR: {wins/len(subset)*100:.0f}%  Avg R: {avg_r:+.2f}")
 
-    # Open positions summary
+    # Open positions summary — oldest first, capped. This runs daily under
+    # launchd and the open list is in the thousands; the whole dump would bury
+    # session.log.
     if still_open:
-        print(f"\n  Open setups ({len(still_open)}):")
-        for r in still_open:
+        shown = sorted(still_open, key=lambda r: r["signal_date"])[:15]
+        print(f"\n  Open setups ({len(still_open)}, oldest {len(shown)}):")
+        for r in shown:
             print(f"    {r['signal_date']}  {r['ticker']:6s}  "
                   f"{r['direction']:4s}  {r['score']}/4  entry ${r['entry_price']}")
+        if len(still_open) > len(shown):
+            print(f"    ... {len(still_open) - len(shown)} more")
 
     print("─────────────────────────────────────────\n")
 

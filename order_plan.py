@@ -401,6 +401,16 @@ def build_plan(signals, state, cfg, high_water_mark=None):
         "kill_switch_triggered": kill_switch,
         "kill_switch_reason": kill_reason,
         "entries_enabled": entries_enabled,
+        # Nothing for Stage 2 to do: no book to manage and no entries allowed.
+        # run_stage2.sh skips its morning session on this rather than paying for
+        # a Claude run to confirm zero. The closing run still goes live daily,
+        # so a fill placed outside this system is caught the same day.
+        "nothing_to_manage": (
+            not entries_enabled
+            and open_count == 0
+            and not positions_to_exit
+            and not positions_to_trail
+        ),
         "qualified_setups": qualified_entries,
         "positions_to_exit": positions_to_exit,
         "positions_to_trail": positions_to_trail,
