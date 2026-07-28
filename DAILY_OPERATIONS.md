@@ -29,6 +29,12 @@ Stage 2) that were removed from the two plists alongside it.
 Stage 2 runs on Sonnet at medium effort with a 60-turn budget (see
 run_stage2.sh) — the session is clerical, the judgement is in order_plan.py.
 
+Stage 1 also scores `setup_log.csv` daily (`outcome_tracker.py`, step 5/5) —
+offline off the Massive cache, no API calls. `python3 outcome_tracker.py
+--summary` prints win rate and avg R by score and strategy without refetching.
+Stage 2 skips its morning session when `plan.nothing_to_manage` is true (flat
+book, entries off); the closing run always goes live.
+
 `validate_plan.py` gates both stages: Stage 1 checks the plan it writes, Stage
 2 re-checks the plan it regenerates from live account state. A rejected plan
 halts the run with no orders placed and the FAIL lines in `decision_log.md`;
