@@ -16,6 +16,21 @@ export PYTHONPATH="$PWD/engine"
 STAMP=$(date '+%Y-%m-%d %H:%M %Z')
 echo "── Stage 2 session $STAMP ──"
 
+# Market-hours guard. launchd does not wake the machine: a slot missed while
+# asleep fires whenever the Mac comes back, which on 2026-07-27 meant a 15:15
+# "closing run" at ~19:00 with the market shut. No order can fill then, so
+# spend no tokens — log the miss and exit. session_prompt.md rule 1.
+# ponytail: weekday 9:30–16:00 ET only, no holiday or half-day calendar. On
+# those days the session runs and finds nothing tradeable, which costs one
+# cheap run; add a calendar if that ever matters.
+read -r DOW HHMM <<< "$(TZ=America/New_York date '+%u %H%M')"
+MINS=$((10#$HHMM))  # 10# so 0930 is not read as octal
+if [ "$DOW" -gt 5 ] || [ "$MINS" -lt 930 ] || [ "$MINS" -gt 1600 ]; then
+  echo "SKIPPED: market closed at $(TZ=America/New_York date '+%a %H:%M ET') \
+— scheduled slot missed (machine asleep?). No session run." | tee -a decision_log.md
+  exit 0
+fi
+
 # Sonnet at medium effort: the session is mechanical — read plan.json, copy
 # live numbers into state.json, run the planner, place the sells it lists. The
 # judgement lives in order_plan.py, not here. Opus was ~5x the cost for the
@@ -29,6 +44,7 @@ claude -p "$(cat AGENT_TASK_PROMPT.md)" \
     "Read" "Glob" "Grep" \
     "Edit(./state.json)" "Edit(./decision_log.md)" \
     "Bash(python3 order_plan.py*)" "Bash(bash run_session.sh*)" \
+    "Bash(python3 validate_plan.py*)" \
     "Bash(python3 outcome_tracker.py*)" "Bash(date*)" "Bash(cat *)" \
   --max-turns 60 2>&1
 STATUS=$?

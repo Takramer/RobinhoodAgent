@@ -27,6 +27,13 @@ python3 order_plan.py --state state.json
 echo "[4/4] Logging setups..."
 python3 setup_logger.py
 
+# Checker half of the maker/checker split: order_plan.py wrote the plan, this
+# refuses to bless one that is structurally broken or unsafe. set -e stops here
+# on rejection. Stage 2 re-validates its own regenerated plan — that is the one
+# that actually trades.
+echo "[gate] Validating plan..."
+python3 validate_plan.py
+
 echo ""
 echo "Stage 1 complete. plan.json ready for Stage 2 (Claude Code execution)."
 echo "Review plan.json or run: claude --print \"\$(cat session_prompt.md)\""

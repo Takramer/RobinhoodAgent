@@ -55,6 +55,12 @@ Then run `python3 order_plan.py --state state.json` and use the regenerated
 plan.json for everything below. If the write or re-run fails, exits still
 execute from the previous plan; place NO new entries.
 
+Then run `python3 validate_plan.py`. Exit 0 means the plan is safe to execute
+— continue. Non-zero means HALT: place no orders at all this run, copy the
+FAIL lines verbatim into decision_log.md, and stop. Do not fix the plan by
+hand, do not re-run the planner to get a different answer, do not reason your
+way past a violation. WARN lines are not failures — note them and continue.
+
 Compare live portfolio_value against plan.json's portfolio_value. If they
 differ by more than 5%, HALT — place no orders, log the discrepancy
 prominently in decision_log.md, stop. Trading on drifted state unattended is

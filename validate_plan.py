@@ -17,12 +17,12 @@ Usage:
 Exit 0 = safe. Exit 1 = one or more violations (printed to stderr).
 Warnings never fail the gate — they print to stderr and exit 0.
 
-Wiring options (pick one; none are applied automatically):
-  - Manual: run it after Stage 1, before trusting plan.json.
-  - Stage 1: append `python3 validate_plan.py || exit 1` to run_session.sh so a
-    bad plan never reaches Stage 2.
-  - Stage 2: add `Bash(python3 validate_plan.py*)` to run_stage2.sh's
-    --allowedTools and have AGENT_TASK_PROMPT.md run it as a Step-1 precondition.
+Wired in two places, because Stage 2 rebuilds plan.json mid-run:
+  - Stage 1 (run_session.sh) checks the plan it just wrote — a maker/checker
+    split on the Python side.
+  - Stage 2 (AGENT_TASK_PROMPT.md Step 2) re-checks after regenerating the plan
+    from live account state. That regenerated plan is the one that trades, so
+    it is the one that has to pass. Rejection there HALTS the run.
 """
 from __future__ import annotations
 
@@ -84,11 +84,16 @@ def validate(plan: dict, today: str | None = None) -> tuple[list[str], list[str]
         if _num(plan[k]) < 0:
             v.append(f"{k} must be >= 0, got {plan[k]}")
 
-    # 5. Position-count sanity.
+    # 5. Position-count sanity. WARN, not fail: being over capacity (a manual
+    #    buy, a lowered max) does not make the plan unsafe to *execute* — and
+    #    failing the gate here would block the exits that bring you back under
+    #    it. Check 6 still fails any plan that tries to add to an over-full
+    #    book, which is the half that actually needs stopping.
     open_n = _num(plan["open_position_count"])
     max_n = _num(plan["max_open_positions"])
     if open_n > max_n:
-        v.append(f"open_position_count {open_n} exceeds max_open_positions {max_n}")
+        w.append(f"open_position_count {open_n} exceeds max_open_positions {max_n} "
+                 "— no new entries can qualify until it comes down")
 
     setups = plan["qualified_setups"]
     exits = plan["positions_to_exit"]
@@ -100,9 +105,9 @@ def validate(plan: dict, today: str | None = None) -> tuple[list[str], list[str]
         exits = []
 
     # 6. Don't plan more entries than open slots.
-    free_slots = max_n - open_n
+    free_slots = max(0.0, max_n - open_n)  # over capacity means zero free, not negative
     if len(setups) > free_slots:
-        v.append(f"{len(setups)} entries planned but only {free_slots} slots free")
+        v.append(f"{len(setups)} entries planned but only {free_slots:.0f} slots free")
 
     # 7. Entries: long buys, positive size, total within deployable cash.
     total_entry = 0.0
@@ -180,6 +185,20 @@ def _self_test() -> int:
     sell_entry["qualified_setups"] = [{"ticker": "AAA", "side": "sell", "dollar_amount": 5}]
     se, _ = validate(sell_entry, today=sell_entry["session_date"])
     assert any("is not a buy" in m for m in se), se
+
+    # Over capacity warns but never fails — a rejected plan would block the
+    # exits that bring the book back under the cap.
+    full = json.loads(_SAMPLE)
+    full["open_position_count"] = 6
+    full["positions_to_exit"] = [{"ticker": "AAA", "side": "sell"}]
+    f_v, f_w = validate(full, today=full["session_date"])
+    assert f_v == [], f"over-capacity must not fail the gate, got {f_v}"
+    assert any("exceeds max_open_positions" in m for m in f_w), f_w
+
+    # ...but an over-capacity plan that still lists entries does fail.
+    full["qualified_setups"] = [{"ticker": "AAA", "dollar_amount": 5}]
+    fe_v, _ = validate(full, today=full["session_date"])
+    assert any("slots free" in m for m in fe_v), fe_v
 
     drift = json.loads(_SAMPLE)
     del drift["portfolio_value"]
