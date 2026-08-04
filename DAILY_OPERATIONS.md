@@ -8,7 +8,7 @@ Two automated layers now run without you touching anything:
 
 1. **launchd (Stage 1)** — 9:50 AM ET weekdays. Pure Python, fully background,
    no app needs to be open. Scans, sizes, writes plan.json.
-2. **Claude scheduled task (Stage 2 — autonomous execution)** — 10:00 AM ET
+2. **Scheduled agent task (Stage 2 — autonomous execution)** — 10:00 AM ET
    weekdays. Reads Stage 1 output, checks live Robinhood account, runs the
    closing scan on open positions, and **places real orders itself**
    (`review_equity_order` → `place_equity_order`) for every qualifying exit
@@ -26,8 +26,18 @@ positions: exits, trails, logging. To resume buying, set it back to `true` —
 and consider restoring the midday runs (12:20/13:35 Stage 1, 12:30/13:45
 Stage 2) that were removed from the two plists alongside it.
 
-Stage 2 runs on Sonnet at medium effort with a 60-turn budget (see
-run_stage2.sh) — the session is clerical, the judgement is in order_plan.py.
+**Which agent runs Stage 2 is a switch: `executor.conf`.** One word —
+`claude`, `codex`, or `off`. Both CLIs run the same AGENT_TASK_PROMPT.md
+against the same Robinhood MCP; `off` logs the skip and places no orders. Env
+wins for a single run: `EXECUTOR=claude bash run_stage2.sh`. Currently set to
+**codex** to stop spending Claude usage — see CODEX_HANDOFF.md for the
+one-time commissioning steps.
+
+Under `claude` the session runs on Sonnet at medium effort with a 60-turn
+budget; under `codex` on gpt-5.6-terra at medium effort, no turn cap. The
+permission fence differs: Claude gets a scoped tool allowlist, Codex gets
+`approval_policy=never` plus a workspace-write sandbox. Either way the session
+is clerical — the judgement is in order_plan.py.
 
 Stage 1 also scores `setup_log.csv` daily (`outcome_tracker.py`, step 5/5) —
 offline off the Massive cache, no API calls. `python3 outcome_tracker.py
@@ -69,8 +79,9 @@ Output lands in `logs/session.log`. Check it if you want to see what fired.
 
 ### 10:00–10:15 AM ET — Stage 2 executes autonomously (no action required)
 
-**Option A — Claude scheduled task (default, fully autonomous)**
-The scheduled task runs AGENT_TASK_PROMPT.md automatically. It checks the live
+**Option A — scheduled task (default, fully autonomous)**
+The scheduled task runs AGENT_TASK_PROMPT.md automatically through whichever
+CLI `executor.conf` names. It checks the live
 account, runs the closing scan, and places every qualifying exit and entry
 itself (`review_equity_order` → `place_equity_order`), then logs to
 `decision_log.md`. You do not confirm anything. Review `decision_log.md`

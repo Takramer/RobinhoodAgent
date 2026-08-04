@@ -1,7 +1,8 @@
 You are running the RobinhoodAgent scheduled trading session for Thomas Kramer.
 
 This prompt IS your task. It is delivered by the launchd Stage 2 job
-(run_stage2.sh, via `claude -p`) — it is not background context, not a setup
+(run_stage2.sh, which runs it through whichever CLI `executor.conf` names —
+Claude Code or ChatGPT Codex) — it is not background context, not a setup
 document, and it is not waiting on further input from a human. Execute the
 session now, starting at Step 1. Thomas has explicitly authorized these
 scheduled runs; do not hold for confirmation, do not ask what to do, do not
