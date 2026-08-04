@@ -22,16 +22,14 @@ Background you need:
 - Real money. Live orders. `validate_plan.py` is a hard gate; never reason
   past a FAIL.
 
+Already verified on 2026-08-04, no need to re-derive: the dead vibe-island
+hooks are gone from `~/.codex/hooks.json`, and `get_accounts` succeeds
+headless with the flags below (agentic account ends 2927). Steps 1 and 2 are
+re-runs to confirm, not investigations — spend your effort on 3.
+
 Do these, in order, and report each one as PASS or FAIL with the evidence.
 
-**1. Dead hooks.** `~/.codex/hooks.json` points every hook at
-`~/.vibe-island/bin/vibe-island-bridge`, and Vibe Island is not installed.
-Every hook fails on every run, and a failed `PermissionRequest` hook cancels
-tool calls — fatal for an unattended session. Back the file up, then replace
-its contents with `{"hooks": {}}`. Confirm a later run prints no `hook: ...
-Failed` lines.
-
-**2. MCP reach.** Confirm you can call the Robinhood MCP non-interactively:
+**1. MCP reach.** Confirm you can call the Robinhood MCP non-interactively:
 
 ```bash
 codex exec "Call the robinhood MCP tool get_accounts. Reply with ONLY the \
@@ -51,11 +49,11 @@ key or value for this Codex build, find the one that is — check
 `run_stage2.sh`'s `codex)` branch to match. Do not paper over it with
 `--dangerously-bypass-approvals-and-sandbox`.
 
-**3. Dry run.** With the market shut, run `bash run_stage2.sh`. It should print
+**2. Dry run.** With the market shut, run `bash run_stage2.sh`. It should print
 `executor: codex` and then skip on the market-hours guard. That proves the
 switch dispatches to you and the guards still hold.
 
-**4. Full rehearsal, no orders.** Run the session prompt yourself with the
+**3. Full rehearsal, no orders.** Run the session prompt yourself with the
 Stage 2 flags, but state up front in your reasoning that you are placing no
 orders this run: do Steps 1–3 of `AGENT_TASK_PROMPT.md` (freshness, live
 account sync, risk gates), write `state.json`, re-run `order_plan.py`, run
@@ -63,7 +61,7 @@ account sync, risk gates), write `state.json`, re-run `order_plan.py`, run
 exit, trail, and entry, with the reason. Place nothing. Append nothing to
 `decision_log.md`.
 
-**5. Report.** Three lines: whether the next scheduled run (weekdays 10:00 and
+**4. Report.** Three lines: whether the next scheduled run (weekdays 10:00 and
 15:15 ET) will execute correctly through you, what you changed, what is still
 broken. Name anything Claude Code could do that you cannot.
 
