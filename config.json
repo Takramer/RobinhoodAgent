@@ -1945,5 +1945,6 @@
     "meta_filter_threshold": "P(win) floor from metamodel.joblib. order_plan skips setups below it (and, at the 3/4 gate, any bull the model couldn't score). Set null to disable and revert to a pure score gate."
   },
   "data_source": "massive",
-  "pead_enabled": true
+  "pead_enabled": true,
+  "vix_source": "proxy"
 }

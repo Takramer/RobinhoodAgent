@@ -165,6 +165,10 @@ This prints the full breakdown:
 | `plan.json` has 0 qualified setups | Normal — market conditions didn't qualify anything today |
 | `plan.json` has `kill_switch_triggered: true` | Check the reason — daily or weekly loss limit hit |
 | `plan.json` has `vix_blocked: true` | VIX regime too high — no entries today, correct behavior |
+| `vix_regime` and `vix_regime_proxy` disagree in the log | Expected. The proxy is SPY realized vol, `vix_level` is the real index. Only the proxy sizes trades until `config.json` sets `"vix_source": "robinhood"` |
+| `vix_level: null` in the plan | The VIX index call failed. Sizing fell back to the proxy — no action needed |
+| Entries skipped with "reports earnings inside the blackout window" | Correct — a report lands within 3 sessions. PEAD entries are never blacked out this way |
+| Entries skipped with "wide/absent book" | Spread was over 50 bps. Usually a halt or a pre-open quote — check the ticker before overriding |
 | Stage 2 returns HTTP 429 | Rate limit hit — stop entries for today, try again tomorrow |
 | Order filled at unexpected price | Market order slippage — acceptable on liquid large-caps |
 | Position not in Robinhood app | Check `decision_log.md` for the exact fill confirmation |

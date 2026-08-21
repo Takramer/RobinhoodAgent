@@ -24,6 +24,14 @@ REQUIRED_FIELDS = {
     "kill_switch_triggered": bool,
 }
 
+# Live facts Stage 2 reads off the Robinhood MCP. Absent means "not collected"
+# and the planner falls back to its Stage 1 estimate, so these are optional —
+# but a wrong type must not reach the planner silently.
+OPTIONAL_FIELDS = {
+    "vix_level": (int, float),
+    "earnings_blackout": list,
+}
+
 
 def load_json(path):
     with open(path) as f:
@@ -60,6 +68,8 @@ def build_sample_state(config):
         "kill_switch_reason": None,
         "vix_regime": "unknown",
         "size_multiplier": 1.0,
+        "vix_level": None,
+        "earnings_blackout": [],
     }
 
 
@@ -70,6 +80,10 @@ def validate_state(state):
             errors.append(f"missing required field: {field}")
             continue
         if not isinstance(state[field], expected_type):
+            errors.append(f"{field} must be {expected_type}, got {type(state[field]).__name__}")
+
+    for field, expected_type in OPTIONAL_FIELDS.items():
+        if field in state and state[field] is not None and not isinstance(state[field], expected_type):
             errors.append(f"{field} must be {expected_type}, got {type(state[field]).__name__}")
 
     positions = state.get("open_positions", [])

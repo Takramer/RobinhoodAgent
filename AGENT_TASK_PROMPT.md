@@ -44,6 +44,15 @@ Call, in order:
 - `get_portfolio` → live value, cash, buying power
 - `get_equity_positions` → live open positions
 - `get_equity_quotes` → live prices for the held tickers (one batched call)
+- `get_indexes` with `symbols="VIX"` → take the returned `id`, then
+  `get_index_quotes` with that id → the real VIX level. Write it as `vix_level`.
+- `get_earnings_calendar` with `days=3`, `filter="high_market_cap"` → keep ONLY
+  entries whose `eps.actual` is null (null = has not reported yet). Intersect
+  those tickers with `plan.json.qualified_setups` and the held tickers, and
+  write the result as `earnings_blackout`.
+
+Either of those two failing is not fatal: write `null` / `[]`, note it in the
+log, continue. The planner falls back to its own estimate.
 
 Then write `state.json` using the schema in session_prompt.md. Carry
 `stop_price`, `target_price`, `atr` and `sessions_held` forward from the
@@ -82,14 +91,15 @@ For every entry in plan.json `positions_to_exit`:
 
 For every entry in `positions_to_trail`: log the new stop in decision_log.md
 and write it into state.json's `stop_price` for that ticker. Do not place a
-stop order (persistent stops via MCP are still log-only — TRADING_RULES.md).
+stop order: the broker supports GTC `stop_market` now, but stop orders require
+whole shares and every position here is fractional (TRADING_RULES.md).
 
 Any live position flagged UNTRACKED in Step 2: log it, do not trade it.
 
 ## Step 5 — ENTRIES (execute, do not queue)
 
 Skip this step entirely — no tradability calls, no reviews — if any of:
-- plan.json `entries_enabled` is false (manage-only mode; currently the case)
+- plan.json `entries_enabled` is false (manage-only mode)
 - Step 3 blocked entries
 - `qualified_setups` is empty
 - it is later than 2:00 PM ET
@@ -97,6 +107,10 @@ Log one line naming the reason and move on.
 
 Otherwise, for each setup in `qualified_setups`:
 - `get_equity_tradability` (batch, max 10 per call); skip and log failures
+- `get_equity_price_book` (max 4 symbols per call). Compute
+  `spread_bps = (best_ask - best_bid) / best_ask * 10000`. Skip and log if
+  `spread_bps > 50` or either side of the book is empty — a market order into a
+  broken quote is the one avoidable way this account loses a whole position.
 - `review_equity_order` (side=buy, type=market, dollar_amount from plan)
 - Blocking alert (buying power, halted, PDT) → skip and log it
 - Otherwise `place_equity_order`. This is a real order.

@@ -25,6 +25,10 @@ Columns:
     outcome_price    Price at outcome (TP/SL hit or time exit close)
     outcome_pnl_r    P&L in R-multiples (1.0 = hit 1× ATR profit)
     outcome_reason   TP / SL / Time / open
+    outcome_pct      Directional % return of the setup, entry to outcome
+    spy_pct          SPY % return over the identical window, same sign
+    excess_pct       outcome_pct - spy_pct — the only number that says whether
+                     this setup beat simply holding SPY over the same days
 """
 
 import csv
@@ -43,6 +47,7 @@ FIELDS = [
     "spy_regime", "vix_regime", "vix_size_mult",
     "executed",
     "outcome_date", "outcome_price", "outcome_pnl_r", "outcome_reason",
+    "outcome_pct", "spy_pct", "excess_pct",
 ]
 
 
@@ -114,6 +119,9 @@ def append_setups(signals, plan):
             "outcome_price":   "",
             "outcome_pnl_r":   "",
             "outcome_reason":  "open",
+            "outcome_pct":     "",
+            "spy_pct":         "",
+            "excess_pct":      "",
         })
 
     if not new_rows:

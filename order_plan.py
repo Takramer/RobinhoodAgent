@@ -9,10 +9,48 @@ the execution plan that a Claude/Codex MCP session can review and execute later.
 import argparse
 import json
 import os
+import uuid
 from datetime import datetime, timezone
 
 
 MIN_ORDER_NOTIONAL = 1.00
+
+# Namespace for deterministic order idempotency keys. Same session + ticker +
+# side always hashes to the same ref_id, so a session retried after a transport
+# failure re-sends the same key and Robinhood dedupes it instead of doubling the
+# position. Do NOT include price or size — a retry must collide, not differ.
+REF_ID_NS = uuid.UUID("6f9d1c2e-4a37-4f8b-9c21-0d5e7a3b1f44")
+
+
+def order_ref_id(session_date, ticker, side):
+    """Deterministic idempotency key for one (session, ticker, side) order."""
+    return str(uuid.uuid5(REF_ID_NS, f"{session_date}|{ticker}|{side}"))
+
+
+# Live VIX regime bands, in CBOE VIX index points. Stage 1 has no VIX feed, so
+# indicators.estimate_vix_regime() approximates these from SPY ATR/price — a
+# trailing realized-vol stand-in for a forward-looking implied-vol index. The two
+# diverge exactly at turns. When Stage 2 reads the real index off the Robinhood
+# MCP and writes vix_level into state.json, classify it directly instead.
+VIX_BANDS = ((15.0, "calm"), (20.0, "normal"),
+             (25.0, "fear_elevated"), (30.0, "fear_spiking"))
+
+VIX_SIZE_MULT = {
+    "calm":          1.0,
+    "normal":        1.0,
+    "fear_elevated": 0.5,
+    "fear_spiking":  0.0,
+    "panic":         0.0,
+    "unknown":       0.75,
+}
+
+
+def classify_vix_level(level):
+    """Map a real VIX index level to the regime names signals_pipeline uses."""
+    for ceiling, name in VIX_BANDS:
+        if level < ceiling:
+            return name
+    return "panic"
 
 
 def load_json(path):
@@ -210,6 +248,23 @@ def build_plan(signals, state, cfg, high_water_mark=None):
     # VIX regime size multiplier from signals (calculated in indicators.py)
     vix_size_mult = _num(signals.get("vix_size_mult"), 1.0)
     vix_regime    = signals.get("vix_regime", "unknown")
+
+    # Live VIX override. Opt-in through config so the gate that governs every
+    # entry never changes without a backtest behind it. The override can only
+    # tighten in practice: if the proxy already read fear_spiking or panic,
+    # Stage 1 scored nothing, so there is no setup left for a calmer real VIX
+    # to let through.
+    vix_level  = _num(state.get("vix_level"), 0.0)
+    vix_source = "spy_atr_proxy"
+    if cfg.get("vix_source") == "robinhood" and vix_level > 0:
+        vix_regime    = classify_vix_level(vix_level)
+        vix_size_mult = VIX_SIZE_MULT[vix_regime]
+        vix_source    = "robinhood_index"
+
+    # Upcoming-earnings blackout. Stage 2 pulls the forward calendar off the MCP
+    # and writes the tickers reporting inside the window. Pre-report only — PEAD
+    # trades the days AFTER a report, so the sleeve is unaffected.
+    earnings_blackout = {str(t).upper() for t in (state.get("earnings_blackout") or [])}
     max_per_sector = int(cfg.get("max_per_sector", 2))
 
     # Market overlays (Sharpe levers): crash-avoidance trend filter blocks new
@@ -302,6 +357,9 @@ def build_plan(signals, state, cfg, high_water_mark=None):
         if vix_size_mult == 0.0:
             skip_reasons[ticker] = f"vix regime '{vix_regime}' blocks all new entries"
             continue
+        if ticker in earnings_blackout:
+            skip_reasons[ticker] = "reports earnings inside the blackout window"
+            continue
         if setup.get("direction") != "bull":
             skip_reasons[ticker] = "bear setup — no short selling via Robinhood MCP"
             continue
@@ -374,6 +432,10 @@ def build_plan(signals, state, cfg, high_water_mark=None):
         remaining_cash  -= adjusted_notional
         sector_counts[sector] = sector_counts.get(sector, 0) + 1
 
+    session_date = signals.get("session_date")
+    for order in qualified_entries + positions_to_exit:
+        order["ref_id"] = order_ref_id(session_date, order["ticker"], order["side"])
+
     return {
         "generated_at":  datetime.now(timezone.utc).isoformat(),
         "session_date":  signals.get("session_date"),
@@ -381,7 +443,11 @@ def build_plan(signals, state, cfg, high_water_mark=None):
         "spy_regime":    signals.get("spy_regime"),
         "vix_regime":    vix_regime,
         "vix_size_mult": vix_size_mult,
-        "vix_blocked":   signals.get("vix_blocked", False),
+        "vix_blocked":   bool(signals.get("vix_blocked")) or vix_size_mult == 0.0,
+        "vix_source":    vix_source,
+        "vix_level":     round(vix_level, 2) if vix_level > 0 else None,
+        "vix_regime_proxy": signals.get("vix_regime", "unknown"),
+        "earnings_blackout": sorted(earnings_blackout),
         "market_risk_off":  market_risk_off,
         "vol_target_mult":  vol_target_mult,
         "realized_vol":     signals.get("realized_vol"),

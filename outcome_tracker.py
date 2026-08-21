@@ -9,6 +9,11 @@ P&L is expressed in R-multiples:
     -1.0 R = stopped out (1× ATR loss)
      0.0 R = time exit at breakeven
 
+Every resolved setup is then scored against SPY over the identical holding
+window (outcome_pct / spy_pct / excess_pct). R-multiples say whether the stop
+and target were hit; excess_pct says whether that was worth more than buying
+SPY on the same day and selling it on the same day.
+
 Run this once per day, ideally at 3:15 PM ET before the close,
 or after hours. It only modifies rows where outcome_reason = "open".
 
@@ -18,9 +23,11 @@ Usage:
 """
 
 import argparse
+import bisect
 import csv
 import json
 import os
+import statistics
 import sys
 from datetime import datetime, timezone
 
@@ -28,11 +35,20 @@ LOG_PATH    = "setup_log.csv"
 CONFIG_PATH = "config.json"
 
 
+# Columns added after the log already existed. _load_rows backfills them as
+# empty so DictWriter never sees a ragged row set.
+LATE_FIELDS = ("outcome_pct", "spy_pct", "excess_pct")
+
+
 def _load_rows():
     if not os.path.exists(LOG_PATH):
         return []
     with open(LOG_PATH, newline="") as f:
-        return list(csv.DictReader(f))
+        rows = list(csv.DictReader(f))
+    for r in rows:
+        for k in LATE_FIELDS:
+            r.setdefault(k, "")
+    return rows
 
 
 def _save_rows(rows):
@@ -95,6 +111,89 @@ def _resolve_outcome(row, bars_after_signal):
     return None  # still open — not enough bars yet
 
 
+def _spy_closes(oldest_date, verbose=True):
+    """Return (sorted_dates, {date: close}) of daily SPY closes covering the log."""
+    from rhengine.market_data import fetch_bars_batch
+
+    span = (datetime.now(timezone.utc).date()
+            - datetime.fromisoformat(oldest_date).date()).days
+    lookback = max(30, min(span + 10, 730))
+    res = fetch_bars_batch(["SPY"], interval="1d", lookback_days=lookback,
+                           verbose=False)
+    bars = res["bars"].get("SPY", [])
+    closes = {
+        datetime.fromtimestamp(b["time"] / 1000, tz=timezone.utc).date().isoformat():
+        b["close"]
+        for b in bars
+    }
+    if verbose and not closes:
+        print("outcome_tracker: SPY bars unavailable — skipping benchmark scoring.")
+    return sorted(closes), closes
+
+
+def _close_on_or_before(dates, closes, day):
+    """SPY close for `day`, falling back to the last session before it."""
+    if day in closes:
+        return closes[day]
+    i = bisect.bisect_right(dates, day)
+    return closes[dates[i - 1]] if i else None
+
+
+def score_vs_spy(verbose=True):
+    """
+    Fill outcome_pct / spy_pct / excess_pct on every resolved row.
+
+    excess_pct is the setup's directional return minus SPY's return over the
+    exact same holding window. This is the only number that says whether a
+    strategy earned anything a plain SPY buy would not have. R-multiples do
+    not: a +2R month in a market that rose 4% is a losing month.
+    """
+    rows = _load_rows()
+    todo = [
+        r for r in rows
+        if r.get("outcome_date") and not r.get("excess_pct")
+        and r.get("outcome_reason") not in ("open", "")
+    ]
+    if not todo:
+        if verbose:
+            print("outcome_tracker: no rows need benchmark scoring.")
+        return
+
+    dates, closes = _spy_closes(min(r["signal_date"] for r in todo), verbose)
+    if not closes:
+        return
+
+    scored = 0
+    for r in todo:
+        try:
+            entry = float(r["entry_price"])
+            exit_ = float(r["outcome_price"])
+        except (ValueError, KeyError, TypeError):
+            continue
+        if entry <= 0:
+            continue
+
+        spy_start = _close_on_or_before(dates, closes, r["signal_date"])
+        spy_end   = _close_on_or_before(dates, closes, r["outcome_date"])
+        if not spy_start or not spy_end:
+            continue
+
+        # +1 long, -1 short: a bear setup beats the market when the name falls
+        # further than SPY does, so both legs get the same sign flip.
+        sign = 1.0 if r.get("direction") == "bull" else -1.0
+        stock_pct = (exit_ - entry) / entry * 100.0
+        spy_pct   = (spy_end - spy_start) / spy_start * 100.0
+
+        r["outcome_pct"] = round(sign * stock_pct, 4)
+        r["spy_pct"]     = round(sign * spy_pct, 4)
+        r["excess_pct"]  = round(sign * (stock_pct - spy_pct), 4)
+        scored += 1
+
+    _save_rows(rows)
+    if verbose:
+        print(f"outcome_tracker: benchmark-scored {scored} setup(s) vs SPY.")
+
+
 def update_outcomes(verbose=True):
     rows = _load_rows()
     if not rows:
@@ -132,8 +231,17 @@ def update_outcomes(verbose=True):
             f"across {len(ticker_to_rows)} ticker(s)..."
         )
 
+    # Window must reach back past the OLDEST open row, not a fixed 30 days.
+    # With a fixed window any row that ages out before it resolves becomes
+    # permanently unresolvable — the fetch returns no post-signal bars, so it
+    # stays "open" forever and silently drops out of every summary.
+    oldest   = min(r["signal_date"] for r in open_rows)
+    span     = (datetime.now(timezone.utc).date()
+                - datetime.fromisoformat(oldest).date()).days
+    lookback = max(30, min(span + 15, 730))
+
     result   = fetch_bars_batch(list(ticker_to_rows.keys()), interval=interval,
-                                lookback_days=30, verbose=False)
+                                lookback_days=lookback, verbose=False)
     updated  = 0
 
     for ticker, bars in result["bars"].items():
@@ -149,6 +257,24 @@ def update_outcomes(verbose=True):
                 continue
 
             outcome = _resolve_outcome(row, post)
+            if not outcome and len(post) >= 10:
+                # Enough sessions elapsed to force a time exit but the walk
+                # produced nothing — the bars are gappy. Close it at the last
+                # available bar rather than leaving it open forever.
+                last = post[-1]
+                try:
+                    entry = float(row["entry_price"]); atr = float(row["atr"])
+                except (ValueError, KeyError):
+                    continue
+                if atr:
+                    sign = 1.0 if row["direction"] == "bull" else -1.0
+                    outcome = (
+                        datetime.fromtimestamp(last["time"] / 1000, tz=timezone.utc)
+                        .date().isoformat(),
+                        last["close"],
+                        round(sign * (last["close"] - entry) / atr, 3),
+                        "Stale",
+                    )
             if outcome:
                 bar_date, price, pnl_r, reason = outcome
                 row["outcome_date"]   = bar_date
@@ -207,6 +333,42 @@ def print_summary():
             print(f"    {strat:20s} {len(subset):3d} trades  "
                   f"WR: {wins/len(subset)*100:.0f}%  Avg R: {avg_r:+.2f}")
 
+    # Benchmark section. Everything above is R-multiples, which are blind to
+    # what the market did over the same window. This is the part that decides
+    # whether the strategy is worth running instead of holding SPY.
+    scored = [r for r in completed if r.get("excess_pct") not in ("", None)]
+    if scored:
+        def _stats(subset):
+            ex = [float(r["excess_pct"]) for r in subset]
+            beat = sum(1 for v in ex if v > 0)
+            return (len(ex), statistics.mean(ex), statistics.median(ex),
+                    beat / len(ex) * 100)
+
+        n, mean_x, med_x, beat_pct = _stats(scored)
+        print(f"\n  vs SPY ({n} scored, same-window excess return)")
+        print(f"    Mean excess : {mean_x:+.2f}%")
+        print(f"    Median      : {med_x:+.2f}%")
+        print(f"    Beat SPY    : {beat_pct:.0f}% of setups")
+
+        traded  = [r for r in scored if str(r.get("executed")) == "True"]
+        skipped = [r for r in scored if str(r.get("executed")) != "True"]
+        if traded and skipped:
+            tn, _, tmed, _ = _stats(traded)
+            sn, _, smed, _ = _stats(skipped)
+            print(f"    Traded      : {tmed:+.2f}% median  (n={tn})")
+            print(f"    Skipped     : {smed:+.2f}% median  (n={sn})")
+            edge = tmed - smed
+            print(f"    Selection   : {edge:+.2f}%  "
+                  f"({'picking winners' if edge > 0 else 'picking losers — the filter is backwards'})")
+
+        # Sampling error on the mean. Under ~20 resolved setups the sign of the
+        # mean is not evidence of anything; print the band so a good-looking
+        # number does not get treated as an edge.
+        if n >= 2:
+            se = statistics.stdev([float(r["excess_pct"]) for r in scored]) / (n ** 0.5)
+            print(f"    Std error   : ±{se:.2f}%  "
+                  f"{'(n too small to call)' if n < 20 or abs(mean_x) < 2 * se else '(significant)'}")
+
     # Open positions summary — oldest first, capped. This runs daily under
     # launchd and the open list is in the thousands; the whole dump would bury
     # session.log.
@@ -228,10 +390,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--summary", action="store_true",
                         help="Print summary only, skip outcome fetching")
+    parser.add_argument("--score-only", action="store_true",
+                        help="Backfill SPY excess-return scoring, skip outcome fetching")
     args = parser.parse_args()
 
     if args.summary:
         print_summary()
+    elif args.score_only:
+        score_vs_spy()
+        print_summary()
     else:
         update_outcomes()
+        score_vs_spy()
         print_summary()

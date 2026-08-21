@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime, timezone
 
-from order_plan import build_plan
+from order_plan import build_plan, classify_vix_level
 
 TODAY = datetime.now(timezone.utc).date().isoformat()
 NOW = datetime.now(timezone.utc).isoformat()
@@ -288,6 +288,60 @@ class OrderPlanTests(unittest.TestCase):
         self.assertTrue(plan["kill_switch_triggered"])
         self.assertEqual(len(plan["positions_to_exit"]), 1)  # exit not blocked
         self.assertEqual(plan["qualified_setups"], [])
+
+
+class LiveMarketContextTests(unittest.TestCase):
+    """Live facts Stage 2 reads off the Robinhood MCP and writes into state.json."""
+
+    def test_vix_bands_map_to_regimes(self):
+        self.assertEqual(classify_vix_level(12.0), "calm")
+        self.assertEqual(classify_vix_level(18.0), "normal")
+        self.assertEqual(classify_vix_level(22.0), "fear_elevated")
+        self.assertEqual(classify_vix_level(27.0), "fear_spiking")
+        self.assertEqual(classify_vix_level(35.0), "panic")
+
+    def test_live_vix_ignored_unless_config_opts_in(self):
+        signals = base_signals(setup())
+        plan = build_plan(signals, base_state(vix_level=40.0), base_config())
+        self.assertEqual(plan["vix_source"], "spy_atr_proxy")
+        self.assertEqual(plan["vix_size_mult"], 1.0)
+        self.assertEqual(len(plan["qualified_setups"]), 1)
+
+    def test_live_vix_panic_blocks_entries_when_enabled(self):
+        cfg = base_config()
+        cfg["vix_source"] = "robinhood"
+        plan = build_plan(base_signals(setup()), base_state(vix_level=40.0), cfg)
+        self.assertEqual(plan["vix_source"], "robinhood_index")
+        self.assertEqual(plan["vix_regime"], "panic")
+        self.assertTrue(plan["vix_blocked"])
+        self.assertEqual(plan["qualified_setups"], [])
+
+    def test_live_vix_halves_size_in_fear_elevated(self):
+        cfg = base_config()
+        cfg["vix_source"] = "robinhood"
+        full = build_plan(base_signals(setup()), base_state(vix_level=12.0), cfg)
+        half = build_plan(base_signals(setup()), base_state(vix_level=22.0), cfg)
+        self.assertEqual(half["vix_size_mult"], 0.5)
+        self.assertLess(half["qualified_setups"][0]["dollar_amount"],
+                        full["qualified_setups"][0]["dollar_amount"])
+
+    def test_missing_vix_level_falls_back_to_proxy(self):
+        cfg = base_config()
+        cfg["vix_source"] = "robinhood"
+        plan = build_plan(base_signals(setup()), base_state(vix_level=None), cfg)
+        self.assertEqual(plan["vix_source"], "spy_atr_proxy")
+        self.assertEqual(len(plan["qualified_setups"]), 1)
+
+    def test_earnings_blackout_skips_the_entry(self):
+        plan = build_plan(base_signals(setup(ticker="AAPL")),
+                          base_state(earnings_blackout=["aapl"]), base_config())
+        self.assertEqual(plan["qualified_setups"], [])
+        self.assertIn("earnings", plan["skip_reasons"]["AAPL"])
+
+    def test_earnings_blackout_leaves_other_tickers_alone(self):
+        plan = build_plan(base_signals(setup(ticker="AAPL")),
+                          base_state(earnings_blackout=["MSFT"]), base_config())
+        self.assertEqual(len(plan["qualified_setups"]), 1)
 
 
 if __name__ == "__main__":
