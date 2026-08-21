@@ -252,15 +252,31 @@ def update_outcomes(verbose=True):
                 .replace(tzinfo=timezone.utc)
                 .timestamp() * 1000
             )
+            age = (datetime.now(timezone.utc).date()
+                   - datetime.fromisoformat(row["signal_date"]).date()).days
+
             post = [b for b in bars if b["time"] > signal_ts]
             if not post:
+                # No bars at all after the signal. The feed for this ticker
+                # stopped; waiting will not produce any. Once the row is past
+                # the hold window it is dead data, not an open trade — close it
+                # flat so it leaves the open list instead of sitting there
+                # forever skewing every count.
+                if age > 30:
+                    row["outcome_date"]   = row["signal_date"]
+                    row["outcome_price"]  = row["entry_price"]
+                    row["outcome_pnl_r"]  = 0.0
+                    row["outcome_reason"] = "Stale"
+                    updated += 1
                 continue
 
             outcome = _resolve_outcome(row, post)
-            if not outcome and len(post) >= 10:
-                # Enough sessions elapsed to force a time exit but the walk
-                # produced nothing — the bars are gappy. Close it at the last
-                # available bar rather than leaving it open forever.
+            if not outcome and (len(post) >= 10 or age > 30):
+                # Either enough sessions elapsed to force a time exit and the
+                # walk still produced nothing, or the row outlived the hold
+                # window on a feed that stopped part-way. Both are dead data.
+                # Close at the last bar that exists rather than leaving the row
+                # open forever.
                 last = post[-1]
                 try:
                     entry = float(row["entry_price"]); atr = float(row["atr"])
