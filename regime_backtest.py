@@ -146,6 +146,8 @@ def main():
     ap.add_argument("--out", default=OUT_PATH)
     ap.add_argument("--split", default="2026-01-01",
                     help="date splitting in-sample from the holdout")
+    ap.add_argument("--recent", default="2026-06-01",
+                    help="start of the trailing recency check")
     args = ap.parse_args()
 
     from rhengine.backtest import run_backtest_on
@@ -189,14 +191,27 @@ def main():
                 # clean holdout t, and it is stated as such — but it is the one
                 # check that a curve fitted to the whole window cannot pass.
                 is_, oos = run(hi=args.split), run(args.split, None)
+                recent = run(args.recent, None)
                 stats["in_sample"] = is_
                 stats["out_sample"] = oos
+                stats["recent"] = recent
                 stats["both_halves_positive"] = bool(
                     is_ and oos
                     and is_["mean_excess"] > 0 and oos["mean_excess"] > 0
                 )
+                # A halves split is not a holdout when both halves contain the
+                # working period. Splitting pead at 2026-01-01 put Jan-May --
+                # when it still worked -- inside the "out" half and hid that
+                # the edge died in June. An edge that has stopped paying is
+                # indistinguishable from no edge for the money about to be
+                # risked, so the most recent window gets a veto rather than a
+                # vote: it cannot qualify a strategy, only disqualify one.
+                stats["recent_positive"] = bool(
+                    recent is None or recent["mean_excess"] > 0
+                )
                 stats["qualified"] = bool(
                     stats["both_halves_positive"]
+                    and stats["recent_positive"]
                     and stats["n_days"] >= 30
                     and stats["t"] >= 2.0
                 )
@@ -226,7 +241,13 @@ def main():
     print(f"\nQualified (both halves positive, >=30 days, pooled t>=2.0): "
           f"{passing or 'NONE'}")
     for k, v in results.items():
-        if v and v.get("both_halves_positive") and not v.get("qualified"):
+        if not v:
+            continue
+        if v.get("both_halves_positive") and not v.get("recent_positive"):
+            r = v["recent"]
+            print(f"  VETOED {k}: pooled t={v['t']} but recent window "
+                  f"{r['mean_excess']:+.2f}% over {r['n_days']} days")
+        elif v.get("both_halves_positive") and not v.get("qualified"):
             print(f"  near miss: {k} pooled t={v['t']} days={v['n_days']}")
 
 
