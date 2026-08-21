@@ -1,5 +1,5 @@
 {
-  "entries_enabled": false,
+  "entries_enabled": true,
   "account": {
     "portfolio_value": 50.0,
     "risk_pct": 0.02,
