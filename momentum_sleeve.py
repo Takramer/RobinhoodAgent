@@ -8,7 +8,7 @@ uncorrelated with them by construction — which is the only free lunch in the
 building.
 
 WHAT THE EVIDENCE ACTUALLY SAYS. Measured on the local Massive panel (897
-tickers, 377 sessions, 2025-02-24 to 2026-08-20), top-20 by 63-day momentum
+tickers, 364 real sessions, 2025-02-24 to 2026-08-20), top-20 by 63-day
 against the universe mean, over NON-OVERLAPPING 10-session windows:
 
     all windows           n=30  +2.56%  t=+2.87
@@ -27,7 +27,7 @@ WHAT THE EVIDENCE DOES NOT SAY, and these are not footnotes:
     any long-only result here is an upper bound.
   - Eighteen months, one broadly rising market.
   - The 12-1 horizon that Ken French's 63 years actually validates shows
-    NOTHING here (t=+0.49). This sleeve rides a 63-day horizon, which is a
+    NOTHING here (t=+0.71 over five windows). This sleeve rides a 63-day horizon, which is a
     different and far less established claim. Do not describe it as the
     RMX-B momentum leg; it is not.
   - Session indexing had to be fixed first: the cache stores market holidays
@@ -149,7 +149,7 @@ def main():
             statistics.median([m for m, _, _ in ranked]) * 100, 2) if ranked else None,
         "armed": False,
         "note": ("Proposed only. Not wired into signals_pipeline and not armed. "
-                 "Evidence is 27 independent observations on a survivorship-"
+                 "Evidence is 30 independent observations on a survivorship-"
                  "biased universe over 18 months; the 12-1 horizon French "
                  "validates shows nothing here (t=+0.71, 5 windows)."),
     }
