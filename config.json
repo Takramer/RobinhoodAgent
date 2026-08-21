@@ -10,7 +10,8 @@
     "weekly_loss_limit_pct": 0.05,
     "max_open_positions": 5,
     "autonomous": true,
-    "target_annual_vol": 0.15
+    "target_annual_vol": 0.15,
+    "max_daily_orders": 3
   },
   "meta_filter_threshold": 0.53,
   "market_trend_filter": true,
@@ -1953,5 +1954,16 @@
       "TMHC"
     ],
     "source": "robinhood get_equity_quotes -> inactive_instruments"
-  }
+  },
+  "banned_instruments": [
+    "FAZ",
+    "LABD",
+    "SDOW",
+    "SPXS",
+    "SQQQ",
+    "SRTY",
+    "TZA",
+    "VXX",
+    "YANG"
+  ]
 }

@@ -37,7 +37,8 @@ CONFIG_PATH = "config.json"
 
 # Columns added after the log already existed. _load_rows backfills them as
 # empty so DictWriter never sees a ragged row set.
-LATE_FIELDS = ("outcome_pct", "spy_pct", "excess_pct")
+LATE_FIELDS = ("outcome_pct", "spy_pct", "excess_pct",
+               "excess_5d", "excess_10d")
 
 
 def _load_rows():
@@ -137,6 +138,87 @@ def _close_on_or_before(dates, closes, day):
         return closes[day]
     i = bisect.bisect_right(dates, day)
     return closes[dates[i - 1]] if i else None
+
+
+def score_fixed_horizons(verbose=True, horizons=(5, 10)):
+    """
+    Excess return at FIXED horizons, measured from entry regardless of exit.
+
+    excess_pct is measured over each setup's own holding window, which the
+    strategy chose. That makes it endogenous: a poor entry rescued by lucky
+    exit timing still scores well, and a strategy can look good purely by
+    picking when to leave. A fixed horizon is exogenous — nothing the strategy
+    does can move the measurement point — so it isolates whether the ENTRY was
+    worth anything.
+
+    Borrowed from the Tradey desk's candidate_outcomes, which scores every
+    candidate at 1/3/5/10 sessions against SPY. It is the one part of that
+    design this project did not already have, and it is the part that can
+    falsify a result the hold-window number would have confirmed.
+    """
+    from rhengine.market_data import fetch_bars_batch
+
+    rows = _load_rows()
+    todo = [r for r in rows
+            if r.get("outcome_reason") in ("TP", "SL", "Time")
+            and not r.get(f"excess_{max(horizons)}d")]
+    if not todo:
+        if verbose:
+            print("outcome_tracker: no rows need fixed-horizon scoring.")
+        return
+
+    oldest = min(r["signal_date"] for r in todo)
+    span = (datetime.now(timezone.utc).date()
+            - datetime.fromisoformat(oldest).date()).days
+    lookback = max(60, min(span + 30, 730))
+
+    tickers = sorted({r["ticker"] for r in todo})
+    res = fetch_bars_batch(tickers + ["SPY"], interval="1d",
+                           lookback_days=lookback, verbose=False)
+    bars = res["bars"]
+    spy = bars.get("SPY") or []
+    if not spy:
+        if verbose:
+            print("outcome_tracker: SPY unavailable — skipping horizon scoring.")
+        return
+
+    def index_by_date(series):
+        return {datetime.fromtimestamp(b["time"] / 1000, tz=timezone.utc)
+                .date().isoformat(): i for i, b in enumerate(series)}
+
+    spy_idx = index_by_date(spy)
+    tick_idx = {t: index_by_date(b) for t, b in bars.items()}
+
+    scored = 0
+    for r in todo:
+        series = bars.get(r["ticker"])
+        if not series:
+            continue
+        k = tick_idx[r["ticker"]].get(r["signal_date"])
+        si = spy_idx.get(r["signal_date"])
+        if k is None or si is None or k + 1 >= len(series) or si + 1 >= len(spy):
+            continue
+        entry = series[k + 1]["open"]
+        spy_entry = spy[si + 1]["close"]
+        if not entry or not spy_entry:
+            continue
+        sign = 1.0 if r.get("direction") == "bull" else -1.0
+        for h in horizons:
+            j = k + 1 + h
+            sj = si + 1 + h
+            # Only score a horizon that has fully elapsed. Clamping to the last
+            # available bar would silently score a 10-day horizon on 3 days of
+            # data and read as a real, short result.
+            if j >= len(series) or sj >= len(spy):
+                continue
+            ret = (series[j]["close"] - entry) / entry * 100.0
+            sret = (spy[sj]["close"] - spy_entry) / spy_entry * 100.0
+            r[f"excess_{h}d"] = round(sign * (ret - sret), 4)
+            scored += 1
+
+    _save_rows(rows)
+    if verbose:
+        print(f"outcome_tracker: fixed-horizon scored {scored} value(s).")
 
 
 def score_vs_spy(verbose=True):
@@ -414,8 +496,10 @@ if __name__ == "__main__":
         print_summary()
     elif args.score_only:
         score_vs_spy()
+        score_fixed_horizons()
         print_summary()
     else:
         update_outcomes()
         score_vs_spy()
+        score_fixed_horizons()
         print_summary()

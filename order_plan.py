@@ -245,6 +245,20 @@ def build_plan(signals, state, cfg, high_water_mark=None):
     deployable_cash = max(0.0, cash_available - cash_floor)
     max_positions = int(account_cfg.get("max_open_positions", 5))
 
+    # Leveraged and inverse ETFs are banned outright. They were previously the
+    # designated downtrend vehicle (bear_regime_only) and exempt from the
+    # risk-off block, so a downtrend bought them long and held for up to
+    # exits.max_hold_sessions. A daily-reset 3x product does not track 3x its
+    # index over ten sessions — it decays with realized volatility, which is
+    # highest in exactly the downtrends that select it. The Tradey desk bans
+    # this whole class and is right to.
+    banned_instruments = set(cfg.get("banned_instruments", []))
+    banned_instruments |= set(cfg.get("bear_regime_only", []))
+
+    # Hard ceiling on orders per session, independent of open slots. Slots cap
+    # how much is held; this caps how much can go wrong in one bad session.
+    max_daily_orders = int(account_cfg.get("max_daily_orders", 0) or 0)
+
     # VIX regime size multiplier from signals (calculated in indicators.py)
     vix_size_mult = _num(signals.get("vix_size_mult"), 1.0)
     vix_regime    = signals.get("vix_regime", "unknown")
@@ -363,11 +377,17 @@ def build_plan(signals, state, cfg, high_water_mark=None):
         if setup.get("direction") != "bull":
             skip_reasons[ticker] = "bear setup — no short selling via Robinhood MCP"
             continue
+        if ticker in banned_instruments:
+            skip_reasons[ticker] = "banned instrument (leveraged/inverse ETF)"
+            continue
         if ticker in held_tickers and ticker not in exit_seen:
             skip_reasons[ticker] = "already held"
             continue
         if remaining_slots <= 0:
             skip_reasons[ticker] = "max open positions reached"
+            continue
+        if max_daily_orders and len(qualified_entries) >= max_daily_orders:
+            skip_reasons[ticker] = f"daily order limit reached ({max_daily_orders})"
             continue
         if remaining_cash < MIN_ORDER_NOTIONAL:
             skip_reasons[ticker] = "cash floor reached"
