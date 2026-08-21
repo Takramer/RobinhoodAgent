@@ -249,7 +249,6 @@
     "ECL",
     "EIX",
     "EW",
-    "EA",
     "ELV",
     "EME",
     "EMR",
@@ -641,7 +640,6 @@
     "BIO",
     "BJ",
     "BKH",
-    "BLD",
     "BMRN",
     "BRKR",
     "BROS",
@@ -756,7 +754,6 @@
     "GNTX",
     "GPK",
     "GT",
-    "GTLS",
     "GWRE",
     "GXO",
     "H",
@@ -784,7 +781,6 @@
     "ITT",
     "JAZZ",
     "JEF",
-    "JHG",
     "JLL",
     "KBH",
     "KBR",
@@ -836,7 +832,6 @@
     "NNN",
     "NOV",
     "NOVT",
-    "NSA",
     "NTNX",
     "NVST",
     "NVT",
@@ -942,7 +937,6 @@
     "THO",
     "TKR",
     "TLN",
-    "TMHC",
     "TNL",
     "TOL",
     "TREX",
@@ -1947,5 +1941,17 @@
   },
   "data_source": "massive",
   "pead_enabled": true,
-  "vix_source": "proxy"
+  "vix_source": "proxy",
+  "delisted_removed": {
+    "date": "2026-08-21",
+    "tickers": [
+      "BLD",
+      "EA",
+      "GTLS",
+      "JHG",
+      "NSA",
+      "TMHC"
+    ],
+    "source": "robinhood get_equity_quotes -> inactive_instruments"
+  }
 }
