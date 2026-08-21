@@ -1,0 +1,102 @@
+{
+  "as_of": "2026-08-20",
+  "capital": 48.27,
+  "lookback": 63,
+  "skip": 5,
+  "universe": 897,
+  "book": [
+    {
+      "ticker": "DELL",
+      "momentum_pct": 103.56,
+      "last": 434.78,
+      "dollars": 3.22
+    },
+    {
+      "ticker": "QLYS",
+      "momentum_pct": 94.81,
+      "last": 182.21,
+      "dollars": 3.22
+    },
+    {
+      "ticker": "ELF",
+      "momentum_pct": 81.49,
+      "last": 98.46,
+      "dollars": 3.22
+    },
+    {
+      "ticker": "CRL",
+      "momentum_pct": 80.27,
+      "last": 291.45,
+      "dollars": 3.22
+    },
+    {
+      "ticker": "PBF",
+      "momentum_pct": 78.11,
+      "last": 69.56,
+      "dollars": 3.22
+    },
+    {
+      "ticker": "HPE",
+      "momentum_pct": 76.98,
+      "last": 52.89,
+      "dollars": 3.22
+    },
+    {
+      "ticker": "SN",
+      "momentum_pct": 76.01,
+      "last": 179.98,
+      "dollars": 3.22
+    },
+    {
+      "ticker": "AVTR",
+      "momentum_pct": 75.76,
+      "last": 14.25,
+      "dollars": 3.22
+    },
+    {
+      "ticker": "OKTA",
+      "momentum_pct": 74.02,
+      "last": 134.16,
+      "dollars": 3.22
+    },
+    {
+      "ticker": "NTAP",
+      "momentum_pct": 72.3,
+      "last": 192.81,
+      "dollars": 3.22
+    },
+    {
+      "ticker": "WDAY",
+      "momentum_pct": 63.06,
+      "last": 197.32,
+      "dollars": 3.22
+    },
+    {
+      "ticker": "PANW",
+      "momentum_pct": 60.54,
+      "last": 349.56,
+      "dollars": 3.22
+    },
+    {
+      "ticker": "ZBRA",
+      "momentum_pct": 55.92,
+      "last": 360.52,
+      "dollars": 3.22
+    },
+    {
+      "ticker": "PATH",
+      "momentum_pct": 54.87,
+      "last": 15.92,
+      "dollars": 3.22
+    },
+    {
+      "ticker": "TECH",
+      "momentum_pct": 54.54,
+      "last": 72.28,
+      "dollars": 3.22
+    }
+  ],
+  "median_universe_momentum_pct": 6.75,
+  "armed": false,
+  "note": "Proposed only. Not wired into signals_pipeline and not armed. Evidence is 27 independent observations on a survivorship-biased universe over 18 months; the 12-1 horizon French validates shows nothing here."
+}
