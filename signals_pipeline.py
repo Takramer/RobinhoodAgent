@@ -61,6 +61,32 @@ def build_signals_payload(cfg, verbose=True):
     bars_map = {t: drop_partial_bar(b) for t, b in bars_map.items()}
     spy_bars = drop_partial_bar(spy_bars)
 
+    # Drop tickers whose data has gone stale. A feed gap does not look like an
+    # error downstream — indicators compute happily on a frozen series and the
+    # same setup re-fires at the same price every session until someone reads
+    # the log. JHG sat at $51.95 for eleven sessions this way. SPY is the
+    # freshness anchor: it is the one symbol guaranteed to be current, so
+    # anything trailing it by more than max_bar_staleness_sessions is out.
+    max_stale = cfg["strategy"].get("max_bar_staleness_sessions", 3)
+    if spy_bars:
+        spy_last = spy_bars[-1]["time"]
+        fresh, stale = {}, []
+        for t, b in bars_map.items():
+            if not b:
+                stale.append((t, "no bars"))
+                continue
+            # Bars are daily; count sessions by position in SPY's own series.
+            behind = sum(1 for x in spy_bars if x["time"] > b[-1]["time"])
+            if behind > max_stale:
+                stale.append((t, f"{behind} sessions behind"))
+            else:
+                fresh[t] = b
+        bars_map = fresh
+        if stale and verbose:
+            names = ", ".join(f"{t} ({why})" for t, why in sorted(stale)[:8])
+            more = f" +{len(stale) - 8} more" if len(stale) > 8 else ""
+            print(f"  Stale data, skipped {len(stale)}: {names}{more}")
+
     # Longer SPY history for the 200-day trend filter and realized-vol targeting.
     # The batch fetch is only ~90d; fetch SPY separately and use it everywhere it
     # helps (regime/VIX work with any length >= 55). Falls back to batch SPY.

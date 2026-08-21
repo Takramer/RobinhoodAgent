@@ -22,6 +22,7 @@
     "mode": "auto",
     "min_score": 3,
     "interval": "1d",
+    "max_bar_staleness_sessions": 3,
     "lookback_days": 90,
     "thresholds": {
       "vwap": {
