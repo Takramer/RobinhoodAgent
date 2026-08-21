@@ -128,13 +128,34 @@ def build_signals_payload(cfg, verbose=True):
         compute_vol_target_mult(spy_bars, target_vol, vol_bounds)
         if target_vol else (1.0, compute_realized_vol(spy_bars))
     )
+    # Strategy choice. In "auto" mode this is decided by realized results in
+    # setup_log.csv rather than the static regime table: a strategy trades only
+    # while its own live excess-return record in this regime clears the sample
+    # and t-statistic bar. An empty selection is a real answer and means place
+    # no entries — see strategy_selector. Naming a strategy in config bypasses
+    # the whole test, which is what manual override is for.
+    import strategy_selector
+
     configured_strategy = cfg["strategy"].get("mode", "auto")
-    strategy_used = (
-        select_strategy_for_regime(spy_regime)
-        if configured_strategy == "auto"
-        else configured_strategy
-    )
-    thresholds = resolve_thresholds(cfg, strategy_used)
+    if configured_strategy == "auto":
+        strategies, selector_report = strategy_selector.select(
+            cfg, spy_regime,
+            static_fallback=select_strategy_for_regime(spy_regime),
+        )
+    else:
+        strategies = [configured_strategy]
+        selector_report = {
+            "regime": spy_regime, "ranked": [], "selected": strategies,
+            "total_resolved": 0, "cold_start": False,
+            "reason": f"manual override: strategy.mode={configured_strategy}",
+        }
+
+    strategy_used = strategies[0] if strategies else None
+    strategy_blocked = not strategies
+    thresholds = resolve_thresholds(cfg, strategy_used) if strategy_used else {}
+
+    if verbose:
+        print(strategy_selector.format_report(selector_report))
 
     # Block all new entries in fear_spiking / panic regardless of strategy
     vix_blocked = vix_regime in ("fear_spiking", "panic")
@@ -142,35 +163,37 @@ def build_signals_payload(cfg, verbose=True):
     # Run scoring at min_score=3. Both 3/4 and 4/4 setups qualify for trading;
     # the meta-model P(win) filter in order_plan.py is the real quality gate
     # (purged-OOS backtest: meta-filtered 3/4+4/4 pool beats 4/4-only).
-    all_setups = [] if vix_blocked else score_all_tickers(
-        bars_map,
-        strategy_used,
-        thresholds,
-        min_score=3,
-        spy_bars=spy_bars,
-        bear_regime_only=cfg.get("bear_regime_only", []),
-        spy_regime=spy_regime,
-    )
+    # Every selected strategy runs, then the pools merge and dedupe by
+    # (ticker, direction) keeping the stronger setup. PEAD used to be hardwired
+    # on here as a regime-agnostic sleeve; it now earns its place through the
+    # same test as everything else, because "always on" and "measured negative
+    # in every regime it has traded" cannot both be right.
+    run_strategies = [] if (vix_blocked or strategy_blocked) else list(strategies)
+    if cfg.get("pead_enabled", True) and "pead" in (selector_report.get("selected") or []):
+        if "pead" not in run_strategies:
+            run_strategies.append("pead")
 
-    # PEAD is an always-on, event-driven sleeve — it runs alongside the regime
-    # strategy (not instead of it), then the two pools are merged and deduped by
-    # (ticker, direction) keeping the stronger setup. It is regime-agnostic because
-    # earnings drift is idiosyncratic, not market-driven.
-    if not vix_blocked and cfg.get("pead_enabled", True):
-        pead_setups = score_all_tickers(
-            bars_map, "pead", resolve_thresholds(cfg, "pead"),
-            min_score=3, spy_bars=spy_bars,
-            bear_regime_only=cfg.get("bear_regime_only", []), spy_regime=spy_regime,
-        )
-        best = {}
-        for s in all_setups + pead_setups:
-            k = (s["ticker"], s["direction"])
-            cur = best.get(k)
-            if cur is None or (s["score"], s.get("strength", 0)) > (cur["score"], cur.get("strength", 0)):
-                best[k] = s
-        all_setups = sorted(best.values(),
-                            key=lambda s: (s["score"], s.get("weighted_score", 0), s.get("strength", 0.0)),
-                            reverse=True)
+    pools = []
+    for name in run_strategies:
+        pools.extend(score_all_tickers(
+            bars_map,
+            name,
+            resolve_thresholds(cfg, name),
+            min_score=3,
+            spy_bars=spy_bars,
+            bear_regime_only=cfg.get("bear_regime_only", []),
+            spy_regime=spy_regime,
+        ))
+
+    best = {}
+    for s in pools:
+        k = (s["ticker"], s["direction"])
+        cur = best.get(k)
+        if cur is None or (s["score"], s.get("strength", 0)) > (cur["score"], cur.get("strength", 0)):
+            best[k] = s
+    all_setups = sorted(best.values(),
+                        key=lambda s: (s["score"], s.get("weighted_score", 0), s.get("strength", 0.0)),
+                        reverse=True)
 
     qualified_setups = [s for s in all_setups if s["score"] >= min_score]
     # candidates = below the trade gate (logged, not traded). Empty when the gate
@@ -219,6 +242,9 @@ def build_signals_payload(cfg, verbose=True):
         "vol_target_mult":   round(vol_target_mult, 3),
         "strategy_mode":  configured_strategy,
         "strategy_used":  strategy_used,
+        "strategies_run":     run_strategies,
+        "strategy_blocked":   strategy_blocked,
+        "strategy_selector":  selector_report,
         "thresholds":     thresholds,
         "interval":       interval,
         "lookback_days":  lookback_days,
