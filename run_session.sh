@@ -3,6 +3,14 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+# Vendored engine (git submodule). Prefer ./engine over any editable install
+# that might point at a different checkout.
+if [ ! -d engine/rhengine ]; then
+  echo "ERROR: engine/rhengine missing. Run: git submodule update --init --recursive" >&2
+  exit 1
+fi
+export PYTHONPATH="${PWD}/engine${PYTHONPATH:+:$PYTHONPATH}"
+
 echo "──────────────────────────────────────"
 echo "RobinhoodAgent  $(date '+%Y-%m-%d %H:%M %Z')"
 echo "──────────────────────────────────────"
