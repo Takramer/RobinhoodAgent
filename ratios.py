@@ -19,7 +19,6 @@ import os
 from datetime import date
 
 import numpy as np
-from scipy.stats import norm, skew, kurtosis
 
 CFG = json.load(open("config.json"))
 PV = CFG["account"]["portfolio_value"]

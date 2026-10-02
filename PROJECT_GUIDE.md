@@ -1,5 +1,11 @@
 # RobinhoodAgent — Project Guide & Handoff Document
-**Owner:** Thomas Kramer | **Last Updated:** June 2026 | **Status:** Phase 4 In Progress
+**Owner:** Thomas Kramer | **Last Updated:** June 2026 | **Status:** ARCHIVAL (stale in places)
+
+> **Operator note (2026-10):** This handoff is historical. Live setup and Stage 1
+> commands live in `README.md` and `DAILY_OPERATIONS.md`. Signal math and market
+> data are **not** top-level `market_data.py` / `indicators.py` — those were
+> extracted to the `engine/` git submodule (`rhengine`). Stage 1 scoring is
+> `signals_pipeline.py`. After clone: `git submodule update --init --recursive`.
 
 ---
 
@@ -31,14 +37,15 @@ Nydex (`/Users/thomaskramer/Downloads/Claude/nydex/`) is Thomas's React/Vite web
 - Displays VIX regime context and sector performance
 
 RobinhoodAgent is the **execution layer** that automates what Nydex currently shows visually.
-The signal math is identical — `indicators.py` is a faithful Python port of `indicators.js`.
-Same five strategies, same leg definitions, same scoring thresholds.
+The signal math lives in `engine/rhengine` (AgentTradingLogic submodule) — a faithful Python
+port of `indicators.js`. Same five strategies, same leg definitions, same scoring thresholds.
+This app's `signals_pipeline.py` orchestrates fetches/scoring and writes `signals.json`.
 
 **Two-system relationship:**
 ```
 Nydex (React/Vite)          RobinhoodAgent (Python + Claude Code)
 ─────────────────────        ─────────────────────────────────────
-Signal visualization    →    Signal calculation (indicators.py)
+Signal visualization    →    Signal calculation (signals_pipeline + rhengine)
 Alpaca paper trading    →    Robinhood live trading (MCP)
 Manual human execution  →    Autonomous Claude Code execution
 Browser-based GUI       →    Terminal + decision log (no GUI)
@@ -59,12 +66,12 @@ connection. Stage 2 is Claude Code — judgment, MCP connection, execution.
 ```
 STAGE 1 — Python (run_session.sh)
 ──────────────────────────────────
-indicators.py --write-signals
-    → Fetches bars from Alpaca IEX for all watchlist tickers + SPY
-    → Classifies SPY regime (uptrend / downtrend / choppy)
+signals_pipeline.py --write-signals
+    → Fetches bars via rhengine.market_data (Alpaca / Massive per config)
+    → Classifies SPY regime (uptrend / downtrend / choppy) in rhengine.indicators
     → Selects strategy based on regime
     → Scores every ticker against that strategy's 4-leg system
-    → Filters to 4/4 setups only
+    → Filters to qualified setups
     → Writes: signals.json
 
 portfolio_state.py --validate   (or --write-sample for dry runs)
@@ -76,6 +83,7 @@ order_plan.py
     → Applies kill switches, cash floor, position limits
     → Calculates ATR-based position sizing
     → Writes: plan.json
+(+ setup_logger.py, outcome_tracker.py, validate_plan.py — see run_session.sh)
 
 STAGE 2 — Claude Code (manual or via launchd)
 ──────────────────────────────────────────────
@@ -233,7 +241,7 @@ standard deviation. A consistently positive risk-adjusted residual = genuine alp
 
 Thresholds are stored per-strategy in `config.json`. Each strategy has its own block with
 only the keys that strategy uses. The `resolve_thresholds(cfg, strategy)` function in
-`indicators.py` reads the correct block and falls back to a flat format for compatibility.
+`rhengine.indicators` reads the correct block and falls back to a flat format for compatibility.
 
 ```json
 "thresholds": {
@@ -432,15 +440,16 @@ and sync state manually on the next portfolio snapshot.
 ## 12. Implementation Phases
 
 ### Phase 1 — Signal Engine ✅ COMPLETE
-`market_data.py`, `indicators.py`, `config.json`, `secrets.json`, `requirements.txt`
-- Alpaca IEX bar fetcher for any ticker list
+`engine/` (rhengine submodule), `signals_pipeline.py`, `config.json`, `secrets.json`, `requirements.txt`
+- Market data + scorers live in `engine/rhengine` (AgentTradingLogic); app orchestrates via `signals_pipeline.py`
+- Alpaca IEX / Massive bar fetch for any ticker list
 - All 5 Nydex strategies ported to Python (faithful to `indicators.js`)
 - SPY regime classifier and strategy selector
 - Per-strategy threshold resolution via `resolve_thresholds()`
 - `build_signals_payload()` and `write_signals()` for pipeline handoff
 - `score_all_tickers()` batch entry point with regime gating
 
-**Test:** `python3 market_data.py` → `python3 indicators.py`
+**Test:** `git submodule update --init` → `python3 signals_pipeline.py --write-signals`
 
 ---
 
@@ -490,13 +499,16 @@ Robinhood. Live state comes from Claude Code in Stage 2.
 
 **`run_session.sh`** — Full Stage 1 pipeline:
 ```bash
-python3 indicators.py --write-signals
+python3 signals_pipeline.py --write-signals
 # validates or generates state.json
 python3 portfolio_state.py --validate (or --write-sample)
 python3 order_plan.py
-# prints: "Dry-run pipeline complete. Review plan.json before any Robinhood MCP execution."
+python3 setup_logger.py
+python3 outcome_tracker.py   # non-fatal
+python3 validate_plan.py
+# prints: Stage 1 complete; plan.json ready for Stage 2
 ```
-Ends with a print, not a Claude Code invocation — launchd plist is the remaining piece.
+Ends with a print, not a Claude Code invocation — launchd plist schedules Stage 2.
 
 **`robinhoodagent.plist`** — Still to build. macOS launchd config that fires
 `run_session.sh` every weekday at 9:50 AM ET (20 min after open).
@@ -557,22 +569,21 @@ from this flag — leave them in place.
 RobinhoodAgent/
 ├── config.json             ← Watchlist, risk params, per-strategy thresholds, ETF rules
 ├── secrets.json            ← Alpaca API keys (DO NOT SHARE)
-├── requirements.txt        ← Python dependencies (requests only)
+├── requirements.txt        ← requests, numpy, scikit-learn, joblib, scipy
+├── engine/                 ← git submodule → Takramer/AgentTradingLogic (rhengine)
+│   └── rhengine/           ← market_data, indicators, backtest (shared source of truth)
 │
-├── market_data.py          ← Alpaca IEX bar fetcher (port of nydex/src/api.js)
-├── indicators.py           ← All 5 scorers + regime classifier + signals writer
-│                              (port of nydex/src/indicators.js)
+├── signals_pipeline.py     ← Stage 1 orchestration: fetch + score → signals.json
 ├── portfolio_state.py      ← state.json schema validator and sample generator
 │                              (does NOT connect to Robinhood)
 ├── order_plan.py           ← signals + state → plan.json (no Robinhood connection)
-├── test_order_plan.py      ← 7 unit tests for order_plan.py business logic
-├── backtest.py             ← walk-forward historical backtest; validate any
-│                              threshold/exit/scoring change out-of-sample first
-├── optimize.py             ← parameter search ranked by OOS expectancy (IS/OOS
-│                              split, guardrails); how the MACD re-route was decided
-├── validation.py           ← Probabilistic + Deflated Sharpe (Bailey/LdP). Net of
-│                              5bps costs + ~25 trials, DSR falls to ~0.88 — the
-│                              backtested edge is fragile. Run before trusting any result.
+├── setup_logger.py         ← appends setups to setup_log.csv
+├── outcome_tracker.py      ← scores past setups (offline)
+├── validate_plan.py        ← Stage 1 gate before Stage 2
+├── test_order_plan.py      ← unit tests for order_plan.py business logic
+├── backtest.py             ← shim → rhengine.backtest
+├── optimize.py             ← local OOS parameter search (prefer rhengine.optimize)
+├── validation.py           ← Probabilistic + Deflated Sharpe (Bailey/LdP)
 │
 │   Meta-labeling layer (López de Prado) — secondary ML model that predicts
 │   P(win) per signal, to filter/rank the TA engine's proposals:
@@ -581,28 +592,29 @@ RobinhoodAgent/
 ├── metalabel.py            ← purged walk-forward train + eval → metamodel.joblib
 ├── metascore.py            ← live P(win) scoring; attaches meta_prob to setups (graceful no-op if model absent)
 ├── news_data.py            ← Alpaca news + lexicon sentiment/flow features (as-of, no lookahead).
-│                              TESTED, did NOT improve OOS AUC (0.530→0.532) — OFF by default
-│                              (features.INCLUDE_NEWS=False); kept for FinBERT/earnings-event follow-up
+│                              TESTED, did NOT improve OOS AUC — OFF by default
+│                              (features.INCLUDE_NEWS=False); kept for FinBERT follow-up
 │
 ├── .claude/
 │   └── settings.json       ← Robinhood MCP config for Claude Code
 ├── session_prompt.md       ← Claude Code runtime instruction (LIVE_TRADING_ENABLED=true)
 ├── TRADING_RULES.md        ← Hard stops, entry/exit rules, logging format
 ├── ROBINHOOD_MCP.md        ← Full Robinhood MCP tool reference
+├── DAILY_OPERATIONS.md     ← Current operator timeline (prefer this over this guide)
 │
 ├── run_session.sh          ← Stage 1 pipeline script (Python only)
 │
-├── signals.json            ← Output of indicators.py (overwritten each session)
+├── signals.json            ← Output of signals_pipeline.py (overwritten each session)
 ├── state.json              ← Portfolio state (sample or MCP-sourced)
 ├── plan.json               ← Output of order_plan.py (overwritten each session)
-├── plan.sample.json        ← Reference sample plan
 ├── state.sample.json       ← Reference sample state
 │
-├── README.md               ← Quick setup reference
-└── PROJECT_GUIDE.md        ← This file
+├── README.md               ← Quick setup reference (canonical)
+└── PROJECT_GUIDE.md        ← This file (archival handoff)
 
-Still to build:
-└── robinhoodagent.plist    ← macOS launchd schedule (Phase 4 final piece)
+Ops / scheduling (see DAILY_OPERATIONS.md):
+├── robinhoodagent.plist
+└── robinhoodagent.stage2.plist
 
 Auto-created by Claude Code on first session:
 └── decision_log.md         ← Append-only session audit trail
@@ -630,21 +642,22 @@ have forced trades here and given up edge. No setups = no trades = no unnecessar
 
 ## 16. Nydex Source Reference
 
-| Python file | Ported from |
+| Python / package | Ported from / role |
 |---|---|
-| `market_data.py` | `/Users/thomaskramer/Downloads/Claude/nydex/src/api.js` |
-| `indicators.py` | `/Users/thomaskramer/Downloads/Claude/nydex/src/indicators.js` |
-| `config.json` (thresholds) | `/Users/thomaskramer/Downloads/Claude/nydex/src/strategies.js` |
+| `engine/rhengine/market_data.py` | Nydex `src/api.js` (shared AgentTradingLogic package) |
+| `engine/rhengine/indicators.py` | Nydex `src/indicators.js` (shared package) |
+| `signals_pipeline.py` | App-side Stage 1 orchestration (was top-level indicators writer) |
+| `config.json` (thresholds) | Nydex `src/strategies.js` (+ engine `strategies.json`) |
 
-If Nydex signal logic is updated, the Python port must be kept in sync manually.
+If Nydex / rhengine signal logic is updated, keep the submodule pin and app orchestration in sync.
 Strategy keys used in both codebases: `vwap`, `bollinger`, `macd`, `consolidation`, `residualmomentum`
 
 ---
 
 ## 17. Pre-Live-Trade Checklist
 
-- [x] Alpaca connection: `python3 market_data.py` returns bar data
-- [x] Signal scoring: `python3 indicators.py` scores watchlist and writes signals.json
+- [x] Engine submodule: `git submodule update --init` → `engine/rhengine` importable
+- [x] Signal scoring: `python3 signals_pipeline.py --write-signals` writes signals.json
 - [x] Order planning: `python3 order_plan.py` writes valid plan.json
 - [x] Unit tests: `python3 -m unittest test_order_plan.py -v` all pass
 - [x] Pipeline script: `bash run_session.sh` runs without errors
